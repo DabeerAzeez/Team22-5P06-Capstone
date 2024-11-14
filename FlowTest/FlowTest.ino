@@ -36,13 +36,15 @@ void loop()
    {
       cloopTime = currentTime; // Updates cloopTime
 
+      Serial.println(flow_frequency, 2); // Print litres/hour with 2 decimal places
+
       // Pulse frequency (Hz) = 9.68Q, Q is flow rate in L/min.
       // Formula: (Pulse frequency x 60 min) / 7.5Q = flowrate in L/min
       l_min = (flow_frequency / 9.68) * 4; // Multiplied by 4 to account for 250 ms timing
 
       flow_frequency = 0; // Reset Counter
 
-      Serial.print(l_min, 2); // Print litres/hour with 2 decimal places
-      Serial.println(" L/min");
+      // Serial.print(l_min, 2); // Print litres/hour with 2 decimal places
+      // Serial.println(" L/min");
    }
 }
