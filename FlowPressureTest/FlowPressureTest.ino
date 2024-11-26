@@ -8,7 +8,7 @@ const unsigned char FLOW_SENSOR_PIN = 2; // Flow sensor input pin
 const unsigned char PRESSURE_SENSOR_PIN = A0; // Pressure sensor input pin
 
 // Interval for reading sensors in milliseconds
-const unsigned long SENSOR_READ_INTERVAL = 250;
+const unsigned long SENSOR_READ_INTERVAL = 50;
 
 volatile int flow_frequency;  // Measures flow sensor pulses
 float l_min;                  // Calculated litres/hour as a float
@@ -21,17 +21,13 @@ void flow()  // Interrupt function for flow sensor
   flow_frequency++;
 }
 
-void setup()
-{
+void setup() {
   // Initialize flow sensor
   pinMode(FLOW_SENSOR_PIN, INPUT);
   digitalWrite(FLOW_SENSOR_PIN, HIGH); // Optional Internal Pull-Up
   Serial.begin(9600);
   attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN), flow, RISING); // Setup Interrupt for flow sensor
   sei(); // Enable interrupts
-
-  // Initialize analog sensor
-  analogReference(INTERNAL);
 
   // Set initial times
   currentTime = millis();
@@ -40,30 +36,36 @@ void setup()
   Serial.println("RESET");
 }
 
-void loop()
-{
+void loop() {
   currentTime = millis();
 
-  // Flow sensor reading every 250 ms
-  if (currentTime >= (cloopTime + SENSOR_READ_INTERVAL))
-  {
+  // Read and print flow and pressure sensor data
+  if (currentTime >= (cloopTime + SENSOR_READ_INTERVAL)) {
     cloopTime = currentTime; // Updates cloopTime
 
-    // Calculate flow rate in L/min
-    l_min = (flow_frequency / 9.68) * 4; // Multiplied by 4 for 250 ms timing
-    Serial.print("Flow Rate: ");
-    Serial.print(l_min, 2); // Print flow rate with 2 decimal places
-    Serial.print(" L/min \t");
+    float flowRate = readFlowSensor();
+    int pressureValue = readPressureSensor();
 
-    flow_frequency = 0; // Reset Counter
+    printSensorValues(flowRate, pressureValue);
   }
+}
 
-  if (currentTime >= (analogSensorTime + SENSOR_READ_INTERVAL))
-  {
-    analogSensorTime = currentTime; // Updates analogSensorTime
+float readFlowSensor() {
+  // Calculate flow rate in L/min
+  float flowRate = (flow_frequency / 9.68) * 4; // Multiplied by 4 for 250 ms timing
+  flow_frequency = 0; // Reset Counter
+  return flowRate;
+}
 
-    int sensorValue = analogRead(PRESSURE_SENSOR_PIN); // Read the analog value
-    Serial.print("Pressure Value: ");
-    Serial.println(sensorValue); // Print analog sensor value
-  }
+int readPressureSensor() {
+  // Read the analog value from the pressure sensor
+  return analogRead(PRESSURE_SENSOR_PIN);
+}
+
+void printSensorValues(float flowRate, int pressureValue) {
+  // Print both flow and pressure values on one line
+  Serial.print("Flow: ");
+  Serial.print(flowRate, 2); // Print flow rate with 2 decimal places
+  Serial.print(" L/min ; Pressure: ");
+  Serial.println(pressureValue); // Print pressure value
 }
