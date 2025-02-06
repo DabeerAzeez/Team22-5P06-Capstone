@@ -4,7 +4,7 @@
 % and then interpolated to pressure (mmHg) using given data points.
 
 PLOT_RAW_DATA = true; 
-COM_PORT = "COM9";
+COM_PORT = serialportlist;
 fs = 100;  % Sampling rate: 100Hz
 ts = 1/fs;
 
