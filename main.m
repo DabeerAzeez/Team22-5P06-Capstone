@@ -89,7 +89,7 @@ while(1)
         title('Pressure Data');
         xlabel('Time (s)');
         ylabel('Pressure (mmHg)');
-        ylim([0 200]);
+        % ylim([0 200]);
     end
     
     pause(0.05); 

@@ -8,18 +8,23 @@ const unsigned char FLOW_SENSOR_PIN = 2; // Flow sensor input pin
 const unsigned char PRESSURE_SENSOR_PIN = A0; // Pressure sensor input pin
 
 // Interval for reading sensors in milliseconds
-const unsigned long SENSOR_READ_INTERVAL = 2000.;
+//  --> Use floats to avoid integer division errors
+const unsigned long PRESSURE_SENSOR_READ_INTERVAL = 50.;
+const unsigned long FLOW_SENSOR_READ_INTERVAL = 2000.;
 
 volatile int flow_frequency;  // Measures flow sensor pulses
 float l_min;                  // Calculated litres/hour as a float
 unsigned long currentTime;
 unsigned long cloopTime;
-unsigned long analogSensorTime = 0; // Timing for analog sensor readings
+unsigned long flowSensorTime = 0; // Timing for flow sensor readings
+unsigned long pressureSensorTime = 0; // Timing for pressure sensor readings
+
+float flowRate = 0;
+int pressureValue = 0;
 
 void flow()  // Interrupt function for flow sensor
 {
   flow_frequency++;
-  //Serial.println(flow_frequency);
 }
 
 void setup() {
@@ -32,28 +37,33 @@ void setup() {
 
   // Set initial times
   currentTime = millis();
-  cloopTime = currentTime;
-  analogSensorTime = currentTime;
+  flowSensorTime = currentTime;
+  pressureSensorTime = currentTime;
   Serial.println("RESET");
 }
 
 void loop() {
   currentTime = millis();
 
-  // Read and print flow and pressure sensor data
-  if (currentTime >= (cloopTime + SENSOR_READ_INTERVAL)) {
-    cloopTime = currentTime; // Updates cloopTime
-
-    float flowRate = readFlowSensor();
-    int pressureValue = readPressureSensor();
-
-    printSensorValues(flowRate, pressureValue);
+  // Update pressure sensor value every 50 ms
+  if (currentTime >= (pressureSensorTime + PRESSURE_SENSOR_READ_INTERVAL)) {
+    pressureSensorTime = currentTime;
+    pressureValue = readPressureSensor();
   }
+
+  // Update flow sensor value every 2000 ms
+  if (currentTime >= (flowSensorTime + FLOW_SENSOR_READ_INTERVAL)) {
+    flowSensorTime = currentTime;
+    flowRate = readFlowSensor();
+  }
+
+  // Print both values
+  printSensorValues(flowRate, pressureValue);
 }
 
 float readFlowSensor() {
   // Calculate flow rate in L/min
-  float flowRate = (flow_frequency / 9.68) * (1000./SENSOR_READ_INTERVAL); // Multiplied by 4 for 250 ms timing
+  float flowRate = (flow_frequency / 9.68) * (1000./FLOW_SENSOR_READ_INTERVAL);
   flow_frequency = 0; // Reset Counter
   return flowRate;
 }
