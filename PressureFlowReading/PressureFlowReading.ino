@@ -43,14 +43,14 @@ void setup() {
     digitalWrite(FLOW_SENSOR_PIN1, HIGH);
     digitalWrite(FLOW_SENSOR_PIN2, HIGH);
     attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN1), flow1, RISING);
-    attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN2), flow2, RISING);
+    // attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN2), flow2, RISING);
 
     // === SERIAL COMMUNICATION SETUP ===
     Serial.begin(9600);
 
     // === MISCELLANEOUS SETUP ===
     analogReference(EXTERNAL);
-    sei();  // Enable global interrupts for flow sensor pulse counting
+    // sei();  // Enable global interrupts for flow sensor pulse counting
 
     currentTime = millis();
     flowSensorTime = currentTime;
@@ -99,6 +99,8 @@ void loop() {
  */
 float readFlowSensor(volatile int &flow_frequency) {
     float flowRate = (flow_frequency / 9.68) * (1000.0 / FLOW_SENSOR_READ_INTERVAL);
+    Serial.print("Flow Rate: ");
+    Serial.println(flowRate);
     flow_frequency = 0;
     return flowRate;
 }
@@ -162,5 +164,25 @@ void printSensorValues(char newFlowIndicator, int flowValueRaw1, float flowValue
     Serial.print(flowValueRaw1);
     Serial.print(", Flow 1: ");
     Serial.print(flowValue1);
-    Serial.println(" L/min");
+    Serial.print(" L/min");
+    Serial.print(", Flow Raw 2: ");
+    Serial.print(flowValueRaw2);
+    Serial.print(", Flow 2: ");
+    Serial.print(flowValue2);
+    Serial.print(" L/min");
+    Serial.print(", Pressure Raw 1: ");
+    Serial.print(pressureValueRaw1);
+    Serial.print(", Pressure 1: ");
+    Serial.print(pressureValue1);
+    Serial.print(" mmHg");
+    Serial.print(", Pressure Raw 2: ");
+    Serial.print(pressureValueRaw2);
+    Serial.print(", Pressure 2: ");
+    Serial.print(pressureValue2);
+    Serial.print(" mmHg");
+    Serial.print(", Pressure Raw 3: ");
+    Serial.print(pressureValueRaw3);
+    Serial.print(", Pressure 3: ");
+    Serial.print(pressureValue3);
+    Serial.println(" mmHg");
 }
