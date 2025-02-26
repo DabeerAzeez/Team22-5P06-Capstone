@@ -6,14 +6,17 @@
   - Pressure sensors are connected via analog pins and use an interpolation function to convert raw ADC values to mmHg.
 */
 
+// TODO: Check that AREF is connected to something
+// TODO: Rename the flow/pressure sensor pins based on the specific locations (e.g. IVC/SVC)? Depends on how we implement modularity
+
 const unsigned char FLOW_SENSOR_PIN1 = 2;  // First flow sensor input pin
 const unsigned char FLOW_SENSOR_PIN2 = 3;  // Second flow sensor input pin
 const unsigned char PRESSURE_SENSOR_PIN1 = A0;  // First pressure sensor input pin
 const unsigned char PRESSURE_SENSOR_PIN2 = A1;  // Second pressure sensor input pin
 const unsigned char PRESSURE_SENSOR_PIN3 = A2;  // Third pressure sensor input pin
 
-const unsigned long PRESSURE_SENSOR_READ_INTERVAL = 50;  // Interval for pressure readings (ms)
-const unsigned long FLOW_SENSOR_READ_INTERVAL = 2000;  // Interval for flow readings (ms); assumed to be many times larger than PRESSURE_SENSOR_READ_INTERVAL
+const unsigned long PRESSURE_SENSOR_READ_INTERVAL = 50.;  // Interval for pressure readings (ms)
+const unsigned long FLOW_SENSOR_READ_INTERVAL = 2000.;  // Interval for flow readings (ms); assumed to be many times larger than PRESSURE_SENSOR_READ_INTERVAL
 
 volatile int flow_frequency1 = 0;  // First flow sensor pulse count
 volatile int flow_frequency2 = 0;  // Second flow sensor pulse count
@@ -43,7 +46,7 @@ void setup() {
     digitalWrite(FLOW_SENSOR_PIN1, HIGH);
     digitalWrite(FLOW_SENSOR_PIN2, HIGH);
     attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN1), flow1, RISING);
-    // attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN2), flow2, RISING);
+    attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN2), flow2, RISING);
 
     // === SERIAL COMMUNICATION SETUP ===
     Serial.begin(9600);
@@ -99,8 +102,6 @@ void loop() {
  */
 float readFlowSensor(volatile int &flow_frequency) {
     float flowRate = (flow_frequency / 9.68) * (1000.0 / FLOW_SENSOR_READ_INTERVAL);
-    Serial.print("Flow Rate: ");
-    Serial.println(flowRate);
     flow_frequency = 0;
     return flowRate;
 }

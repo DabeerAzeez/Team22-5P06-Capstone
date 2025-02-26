@@ -5,7 +5,12 @@ classdef CCTA_exported < matlab.apps.AppBase
         UIFigure                        matlab.ui.Figure
         TabGroup2                       matlab.ui.container.TabGroup
         MainTab                         matlab.ui.container.Tab
-        HOLDGRAPHButton                 matlab.ui.control.StateButton
+        ExportDataButton                matlab.ui.control.Button
+        ClearDataButton                 matlab.ui.control.Button
+        COMPortDropDown                 matlab.ui.control.DropDown
+        COMPortDropDownLabel            matlab.ui.control.Label
+        CONNECTButton                   matlab.ui.control.Button
+        HoldGraphsButton                matlab.ui.control.StateButton
         PUMPOFFButton                   matlab.ui.control.Button
         PUMPONButton                    matlab.ui.control.Button
         FlowMonitoringControlPanel      matlab.ui.container.Panel
@@ -22,11 +27,6 @@ classdef CCTA_exported < matlab.apps.AppBase
         EditField_5                     matlab.ui.control.NumericEditField
         EditField_4                     matlab.ui.control.NumericEditField
         Label_2                         matlab.ui.control.Label
-        TabGroup                        matlab.ui.container.TabGroup
-        PressureTab                     matlab.ui.container.Tab
-        PressureAxes                    matlab.ui.control.UIAxes
-        FlowTab                         matlab.ui.container.Tab
-        FlowAxes                        matlab.ui.control.UIAxes
         PressureMonitoringControlPanel  matlab.ui.container.Panel
         Pressure_IVC_GraphEnable        matlab.ui.control.CheckBox
         Pressure_SVC_GraphEnable        matlab.ui.control.CheckBox
@@ -46,20 +46,16 @@ classdef CCTA_exported < matlab.apps.AppBase
         EditField_2                     matlab.ui.control.NumericEditField
         EditField                       matlab.ui.control.NumericEditField
         Label                           matlab.ui.control.Label
-        Title                           matlab.ui.control.Label
-        DeveloperModeTab                matlab.ui.container.Tab
-        SavelogfileButton               matlab.ui.control.Button
-        SensorDataTextArea              matlab.ui.control.TextArea
-        SensorDataTextAreaLabel         matlab.ui.control.Label
+        FlowAxes                        matlab.ui.control.UIAxes
+        PressureAxes                    matlab.ui.control.UIAxes
+        DeveloperOptionsTab             matlab.ui.container.Tab
+        SimulateDataCheckBox            matlab.ui.control.CheckBox
     end
 
 
     properties (Access = private)
         plot_raw_data = true;
-        COM_PORT = serialportlist;  % works automatically if only one serial port device is connected
         f_refresh = 20;  % App refresh rate (Hz)
-
-        sensorDataLog = "";  % to store a log of recent sensor data values for developer tab
 
         arduinoObj;
         tempLogFile = fullfile(pwd, 'console_output_temp.txt');  % Define a persistent temporary log file that always stores session history
@@ -85,12 +81,12 @@ classdef CCTA_exported < matlab.apps.AppBase
 
     methods (Access = private)
 
-        function [newFlowIndicator, flow_value_raw1, flow_value1, ...
+        function [t, newFlowIndicator, flow_value_raw1, flow_value1, ...
                 flow_value_raw2, flow_value2, pressure_value_raw1, ...
                 pressure_value1, pressure_value_raw2, pressure_value2, ...
                 pressure_value_raw3, pressure_value3] = readSensorData(app)
 
-            % Reads and parses JSON data from the Arduino serial port.
+            % Reads and parses serial data from the Arduino serial port.
             % Inputs:
             %   serialObj - MATLAB serial object for Arduino communication.
             % Outputs:
@@ -99,10 +95,19 @@ classdef CCTA_exported < matlab.apps.AppBase
             %   pressure_value_raw - Raw ADC value for pressure sensor.
             %   pressure_value - Processed pressure in mmHg.
 
-            % Flush serial buffer by reading three times
-            for j = 1:3
-                line = readline(app.arduinoObj);
+            if app.SimulateDataCheckBox.Value
+                % Simulate data (for testing)
+                line = "New Flow?: N, Flow Raw 1: 0, Flow 1: 1.50 L/min, Flow Raw 2: 0, Flow 2: 2.50 L/min, Pressure Raw 1: 1023, Pressure 1: 20 mmHg, Pressure Raw 2: 1023, Pressure 2: 50 mmHg, Pressure Raw 3: 1023, Pressure 3: 80 mmHg\n";
+            else
+                % Read data from Arduino; flush serial buffer by reading
+                % three times to improve results
+                for j = 1:3
+                    line = readline(app.arduinoObj);
+                end
             end
+
+            t = toc;
+            pause(app.dt_refresh);  % pause to allow app to process other user inputs (e.g. button presses)
 
             % Attempt to parse the serial data
             try
@@ -112,7 +117,7 @@ classdef CCTA_exported < matlab.apps.AppBase
                 % Pressure Raw 3: 540, Pressure 3: 78.4 mmHg"
 
                 % Extract values using sscanf
-                data = sscanf(line, 'New Flow?: %c, Flow Raw 1: %d, Flow 1: %f L/min, Flow Raw 2: %d, Flow 2: %f L/min, Pressure Raw 1: %d, Pressure 1: %f mmHg, Pressure Raw 2: %d, Pressure 2: %f mmHg, Pressure Raw 3: %d, Pressure 3: %f mmHg');
+                data = sscanf(line, 'New Flow?: %c, Flow Raw 1: %d, Flow 1: %f L/min, Flow Raw 2: %d, Flow 2: %f L/min, Pressure Raw 1: %d, Pressure 1: %f mmHg, Pressure Raw 2: %d, Pressure 2: %f mmHg, Pressure Raw 3: %d, Pressure 3: %f mmHg\n');
 
                 % Ensure we received all expected values
                 if numel(data) == 11
@@ -129,7 +134,7 @@ classdef CCTA_exported < matlab.apps.AppBase
                     pressure_value3 = data(11);
 
                     % Get timestamp
-                    timestamp = datetime("now", 'yyyy-mm-dd HH:MM:SS');
+                    timestamp = datetime("now");
 
                     % Format the new sensor data as a string
                     newLogEntry = sprintf(['===== Sensor Data (%s) =====\n', ...
@@ -147,26 +152,14 @@ classdef CCTA_exported < matlab.apps.AppBase
                         pressure_value_raw3, pressure_value3);
 
                     % Print to console
-                    fprintf('%s', newLogEntry);
-
-                    % Append to the stored console log
-                    app.sensorDataLog = strcat(app.sensorDataLog, newLogEntry);
-
-                    % Limit console log size to the last 100 entries (to prevent slowdowns)
-                    maxEntries = 100;
-                    logLines = strsplit(app.sensorDataLog, '\n'); % Split into individual lines
-                    if length(logLines) > maxEntries * 9  % Each entry has around 9 lines
-                        logLines = logLines(end - (maxEntries * 9) + 1:end); % Keep only the last 100 entries
-                    end
-                    app.sensorDataLog = strjoin(logLines, '\n'); % Reconstruct the trimmed log
-
-                    % Update text area
-                    app.ConsoleOutputTextArea.Value = app.sensorDataLog;
+                    % fprintf('%s', newLogEntry);
                 else
                     warning('Failed to parse expected number of values from serial data.');
+                    disp(line);
                 end
             catch
                 warning('Error reading and parsing serial data.');
+                disp(line);
             end
 
         end
@@ -180,44 +173,49 @@ classdef CCTA_exported < matlab.apps.AppBase
             fprintf('Logging started. All session logs will be recorded in: %s\n', app.tempLogFile);
         end
 
-        function stopLogging(app)
+        function saveLog(app, filename)
             % Stop logging to the temporary file
             diary off;
 
-            % Define a unique filename for saving the log snapshot
-            timestamp = datetime("now", 'yyyy-mm-dd_HH-MM-SS');
-            savedLogFile = fullfile(pwd, ['sensor_log_' timestamp '.txt']);
-
-            % Copy the temp log file to the new timestamped log file
-            copyfile(app.tempLogFile, savedLogFile);
+            % Copy the temp log file to the new provided log file
+            copyfile(app.tempLogFile, filename);
 
             % Notify user
-            fprintf('Log file saved as: %s\n', savedLogFile);
+            fprintf('Log file saved as: %s\n', filename);
 
             % Restart logging to the temporary file to maintain session history
             diary(app.tempLogFile);
             diary on;
         end
 
-    end
-
-
-    % Callbacks that handle component events
-    methods (Access = private)
-
-        % Code that executes after component creation
-        function startupFcn(app)
-            app.arduinoObj = serialport(app.COM_PORT, 9600);
-
+        
+        function clearDataArrays(app)
             tic;
-            app.startLogging();
+            app.t = [];
+
+            app.flow_vals1 = [];  
+            app.flow_vals2 = [];
+
+            app.pressure_vals1 = [];
+            app.pressure_vals2 = [];
+            app.pressure_vals3 = [];
+
+            pause(app.dt_refresh);
+
+            app.runMainLoop();  % Re-run it here from the beginning to reset time array properly
+        end
+       
+        
+        function runMainLoop(app)
             while (1)
                 % Read sensor data
-                [~, ~, flow_value1, ~, flow_value2, ...
+                [tNew, ~, ~, flow_value1, ~, flow_value2, ...
                     ~, pressure_value1, ~, pressure_value2, ...
                     ~, pressure_value3] = app.readSensorData();
 
                 % Append new sensor data
+                disp(app.t);
+                app.t = [app.t tNew];
                 app.flow_vals1 = [app.flow_vals1 flow_value1];
                 app.flow_vals2 = [app.flow_vals2 flow_value2];
 
@@ -233,12 +231,9 @@ classdef CCTA_exported < matlab.apps.AppBase
                 app.Flow_IVC_EditField_Current.Value = flow_value1;
                 app.Flow_SVC_EditField_Current.Value = flow_value2;
 
-                % Update time tracking
-                app.t = [app.t toc];
-
                 % Plot pressure data based on checkbox selections
                 % as long as "hold graph" is not pressed
-                if app.HOLDGRAPHButton.Value == false
+                if app.HoldGraphsButton.Value == false
                     hold(app.PressureAxes, 'on');
                     cla(app.PressureAxes); % Clear previous plots
 
@@ -257,17 +252,17 @@ classdef CCTA_exported < matlab.apps.AppBase
                     xlabel(app.PressureAxes, 'Time (s)');
                     ylabel(app.PressureAxes, 'Pressure (mmHg)');
                     ylim(app.PressureAxes, [0 200]);
-                    legend(app.PressureAxes, 'show');
+                    legend(app.PressureAxes, 'show','Location','northwest');
 
                     % Plot flow data based on checkbox selections
                     hold(app.FlowAxes, 'on');
                     cla(app.FlowAxes); % Clear previous plots
 
-                    if app.Flow_SVC_GraphEnable.Value
-                        plot(app.FlowAxes, app.t, app.flow_vals1, 'r', 'DisplayName', 'Flow SVC');
-                    end
                     if app.Flow_IVC_GraphEnable.Value
-                        plot(app.FlowAxes, app.t, app.flow_vals2, 'g', 'DisplayName', 'Flow IVC');
+                        plot(app.FlowAxes, app.t, app.flow_vals1, 'r', 'DisplayName', 'Flow IVC');
+                    end
+                    if app.Flow_SVC_GraphEnable.Value
+                        plot(app.FlowAxes, app.t, app.flow_vals2, 'g', 'DisplayName', 'Flow SVC');
                     end
 
                     hold(app.FlowAxes, 'off');
@@ -275,19 +270,137 @@ classdef CCTA_exported < matlab.apps.AppBase
                     xlabel(app.FlowAxes, 'Time (s)');
                     ylabel(app.FlowAxes, 'Flow (L/min)');
                     ylim(app.FlowAxes, [0 5]);
-                    legend(app.FlowAxes, 'show');
+                    legend(app.FlowAxes, 'show','Location','northwest');
+                end
+
+                if app.CONNECTButton.Text == "CONNECT"
+                    break
                 end
 
                 % Pause to prevent crashes
                 pause(app.dt_refresh);
             end
+        end
+    end
+
+
+    % Callbacks that handle component events
+    methods (Access = private)
+
+        % Code that executes after component creation
+        function startupFcn(app)
+            app.startLogging();
+            
+            % Get list of available serial ports
+            ports = serialportlist;
+
+            % Read the "friendly names" of the COM Port devices using Powershell
+
+            portInfo = {}; 
+
+            % Use system command to get device descriptions (Windows)
+            if ispc
+                [~, cmdout] = system("powershell -Command ""Get-WMIObject Win32_PnPEntity | Where-Object { $_.Name -match '\(COM[0-9]+\)' } | ForEach-Object { $_.Name }""");
+                deviceList = splitlines(strtrim(cmdout));
+            else
+                deviceList = repmat("Unknown Device", size(ports));
+            end
+
+            for i = 1:length(ports)
+                matchIdx = find(contains(deviceList, ports(i)), 1);
+                if ~isempty(matchIdx)
+                    idn = deviceList{matchIdx};
+                    idn = strtrim(erase(idn, ['(', ports(i), ')'])); % Strip duplicate COM port info from the name 
+                else
+                    idn = "Unknown Device";
+                end
+
+
+                portInfo{i} = sprintf('%s: %s', ports(i), idn);
+            end
+
+            % Update dropdown with formatted port names
+            app.COMPortDropDown.Items = portInfo;
+            app.COMPortDropDown.ItemsData = ports;  % To allow proper connections when using serialport() later off of the selected dropdown value
+        end
+
+        % Callback function
+        function SavelogfileButtonPushed(app, event)
 
         end
 
-        % Button pushed function: SavelogfileButton
-        function SavelogfileButtonPushed(app, event)
-            app.stopLogging();
-            app.startLogging();  % continue logging
+        % Button pushed function: CONNECTButton
+        function CONNECTButtonPushed(app, event)
+            
+            if app.CONNECTButton.Text == "CONNECT"
+                % Someone just connected to the serial device
+                app.CONNECTButton.Text = "DISCONNECT";
+                app.CONNECTButton.BackgroundColor = 'red';
+
+                app.arduinoObj = serialport(app.COMPortDropDown.Value, 9600);
+                app.clearDataArrays();
+    
+                tic;
+                app.startLogging();
+                app.runMainLoop();
+
+            elseif app.CONNECTButton.Text == "DISCONNECT"
+                % Someone just disconnected from the serial device
+                app.arduinoObj = [];
+                app.CONNECTButton.Text = "CONNECT";
+                app.CONNECTButton.BackgroundColor = 'green';
+            else
+                error("Connect button container contains invalid text.")
+            end
+        end
+
+        % Callback function
+        function ClearDataButtonValueChanged(app, event)
+            % Empty time and sensor data arrays
+            app.clearDataArrays();
+        end
+
+        % Button pushed function: ClearDataButton
+        function ClearDataButtonPushed(app, event)
+            % Empty time and sensor data arrays
+            app.clearDataArrays();
+        end
+
+        % Button pushed function: ExportDataButton
+        function ExportDataButtonPushed(app, event)
+            % Get current timestamp
+            timestamp = char(datetime('now', 'Format', 'yyyy-MM-dd-HH-mm-ss'));
+            folderName = fullfile(pwd, ['CCTA-', timestamp]);
+            
+            % Create subfolder
+            if ~exist(folderName, 'dir')
+                mkdir(folderName);
+            end
+            
+            % Save Pressure and Flow Axes as .fig and .png
+            exportgraphics(app.PressureAxes, fullfile(folderName, 'PressurePlot.png'));
+            exportgraphics(app.FlowAxes, fullfile(folderName, 'FlowPlot.png'));
+            
+            % Save data arrays to .mat/.csv files
+            data.t = app.t;
+            data.flow_vals1 = app.flow_vals1;
+            data.flow_vals2 = app.flow_vals2;
+            data.pressure_vals1 = app.pressure_vals1;
+            data.pressure_vals2 = app.pressure_vals2;
+            data.pressure_vals3 = app.pressure_vals3;
+            
+            save(fullfile(folderName, 'ExportedData.mat'), '-struct', 'data');
+
+            csvData = table(app.t(:), app.flow_vals1(:), app.flow_vals2(:), app.pressure_vals1(:), app.pressure_vals2(:), app.pressure_vals3(:), ...
+                'VariableNames', {'Time (s)', 'Flow_SVC (L/min)', 'Flow_IVC (L/min)', 'Pressure_PA (mmHg)', 'Pressure_SVC (mmHg)', 'Pressure_IVC (mmHg)'});
+            
+            writetable(csvData, fullfile(folderName, 'ExportedData.csv'));
+
+            % Save console output to text file
+            app.saveLog(fullfile(folderName, 'console_output.txt'));
+            
+            % Display dialog box
+            uialert(app.UIFigure, ['Data has been saved to ', folderName], 'Export Successful', 'Icon', 'info');
         end
     end
 
@@ -299,30 +412,38 @@ classdef CCTA_exported < matlab.apps.AppBase
 
             % Create UIFigure and hide until all components are created
             app.UIFigure = uifigure('Visible', 'off');
-            app.UIFigure.Position = [100 100 884 468];
+            app.UIFigure.Position = [100 100 1228 463];
             app.UIFigure.Name = 'MATLAB App';
 
             % Create TabGroup2
             app.TabGroup2 = uitabgroup(app.UIFigure);
-            app.TabGroup2.Position = [1 3 884 466];
+            app.TabGroup2.Position = [1 3 1229 461];
 
             % Create MainTab
             app.MainTab = uitab(app.TabGroup2);
             app.MainTab.Title = 'Main';
 
-            % Create Title
-            app.Title = uilabel(app.MainTab);
-            app.Title.HorizontalAlignment = 'center';
-            app.Title.FontSize = 24;
-            app.Title.FontWeight = 'bold';
-            app.Title.Position = [208 401 497 32];
-            app.Title.Text = 'Cardiac Catheterization Testing Apparatus';
+            % Create PressureAxes
+            app.PressureAxes = uiaxes(app.MainTab);
+            title(app.PressureAxes, 'Pressure Data')
+            xlabel(app.PressureAxes, 'Time (s)')
+            ylabel(app.PressureAxes, 'Pressure (mmHg)')
+            zlabel(app.PressureAxes, 'Z')
+            app.PressureAxes.Position = [360 127 373 270];
+
+            % Create FlowAxes
+            app.FlowAxes = uiaxes(app.MainTab);
+            title(app.FlowAxes, 'Flow Data')
+            xlabel(app.FlowAxes, 'Time(s)')
+            ylabel(app.FlowAxes, 'Flow (L/min)')
+            zlabel(app.FlowAxes, 'Z')
+            app.FlowAxes.Position = [788 127 410 270];
 
             % Create PressureMonitoringControlPanel
             app.PressureMonitoringControlPanel = uipanel(app.MainTab);
             app.PressureMonitoringControlPanel.Title = 'Pressure Monitoring & Control';
             app.PressureMonitoringControlPanel.FontWeight = 'bold';
-            app.PressureMonitoringControlPanel.Position = [36 192 298 181];
+            app.PressureMonitoringControlPanel.Position = [38 234 298 181];
 
             % Create Label
             app.Label = uilabel(app.PressureMonitoringControlPanel);
@@ -423,39 +544,11 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.Pressure_IVC_GraphEnable.Position = [260 81 25 22];
             app.Pressure_IVC_GraphEnable.Value = true;
 
-            % Create TabGroup
-            app.TabGroup = uitabgroup(app.MainTab);
-            app.TabGroup.Position = [357 85 490 288];
-
-            % Create PressureTab
-            app.PressureTab = uitab(app.TabGroup);
-            app.PressureTab.Title = 'Pressure';
-
-            % Create PressureAxes
-            app.PressureAxes = uiaxes(app.PressureTab);
-            title(app.PressureAxes, 'Title')
-            xlabel(app.PressureAxes, 'X')
-            ylabel(app.PressureAxes, 'Y')
-            zlabel(app.PressureAxes, 'Z')
-            app.PressureAxes.Position = [6 10 477 248];
-
-            % Create FlowTab
-            app.FlowTab = uitab(app.TabGroup);
-            app.FlowTab.Title = 'Flow';
-
-            % Create FlowAxes
-            app.FlowAxes = uiaxes(app.FlowTab);
-            title(app.FlowAxes, 'Title')
-            xlabel(app.FlowAxes, 'X')
-            ylabel(app.FlowAxes, 'Y')
-            zlabel(app.FlowAxes, 'Z')
-            app.FlowAxes.Position = [6 10 477 248];
-
             % Create FlowMonitoringControlPanel
             app.FlowMonitoringControlPanel = uipanel(app.MainTab);
             app.FlowMonitoringControlPanel.Title = 'Flow Monitoring & Control';
             app.FlowMonitoringControlPanel.FontWeight = 'bold';
-            app.FlowMonitoringControlPanel.Position = [36 28 298 143];
+            app.FlowMonitoringControlPanel.Position = [38 70 298 143];
 
             % Create Label_2
             app.Label_2 = uilabel(app.FlowMonitoringControlPanel);
@@ -532,7 +625,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.PUMPONButton.BackgroundColor = [0.4667 0.6745 0.1882];
             app.PUMPONButton.FontWeight = 'bold';
             app.PUMPONButton.Enable = 'off';
-            app.PUMPONButton.Position = [358 28 110 36];
+            app.PUMPONButton.Position = [39 32 80 22];
             app.PUMPONButton.Text = 'PUMP ON';
 
             % Create PUMPOFFButton
@@ -540,35 +633,64 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.PUMPOFFButton.BackgroundColor = [1 0 0];
             app.PUMPOFFButton.FontWeight = 'bold';
             app.PUMPOFFButton.Enable = 'off';
-            app.PUMPOFFButton.Position = [736 28 110 36];
+            app.PUMPOFFButton.Position = [257 32 79 21];
             app.PUMPOFFButton.Text = 'PUMP OFF';
 
-            % Create HOLDGRAPHButton
-            app.HOLDGRAPHButton = uibutton(app.MainTab, 'state');
-            app.HOLDGRAPHButton.Text = 'HOLD GRAPH';
-            app.HOLDGRAPHButton.BackgroundColor = [0.302 0.7451 0.9333];
-            app.HOLDGRAPHButton.FontWeight = 'bold';
-            app.HOLDGRAPHButton.Position = [546 28 111 35];
+            % Create HoldGraphsButton
+            app.HoldGraphsButton = uibutton(app.MainTab, 'state');
+            app.HoldGraphsButton.Text = 'Hold Graphs';
+            app.HoldGraphsButton.BackgroundColor = [0.9412 0.9412 0.9412];
+            app.HoldGraphsButton.FontSize = 14;
+            app.HoldGraphsButton.FontWeight = 'bold';
+            app.HoldGraphsButton.Position = [807 63 125 30];
 
-            % Create DeveloperModeTab
-            app.DeveloperModeTab = uitab(app.TabGroup2);
-            app.DeveloperModeTab.Title = 'Developer Mode';
+            % Create CONNECTButton
+            app.CONNECTButton = uibutton(app.MainTab, 'push');
+            app.CONNECTButton.ButtonPushedFcn = createCallbackFcn(app, @CONNECTButtonPushed, true);
+            app.CONNECTButton.BackgroundColor = [0 1 0];
+            app.CONNECTButton.FontSize = 14;
+            app.CONNECTButton.FontWeight = 'bold';
+            app.CONNECTButton.Position = [447 30 102 25];
+            app.CONNECTButton.Text = 'CONNECT';
 
-            % Create SensorDataTextAreaLabel
-            app.SensorDataTextAreaLabel = uilabel(app.DeveloperModeTab);
-            app.SensorDataTextAreaLabel.HorizontalAlignment = 'right';
-            app.SensorDataTextAreaLabel.Position = [35 384 75 22];
-            app.SensorDataTextAreaLabel.Text = 'Sensor Data ';
+            % Create COMPortDropDownLabel
+            app.COMPortDropDownLabel = uilabel(app.MainTab);
+            app.COMPortDropDownLabel.HorizontalAlignment = 'right';
+            app.COMPortDropDownLabel.FontSize = 14;
+            app.COMPortDropDownLabel.FontWeight = 'bold';
+            app.COMPortDropDownLabel.Position = [361 71 70 22];
+            app.COMPortDropDownLabel.Text = 'COM Port';
 
-            % Create SensorDataTextArea
-            app.SensorDataTextArea = uitextarea(app.DeveloperModeTab);
-            app.SensorDataTextArea.Position = [125 134 723 274];
+            % Create COMPortDropDown
+            app.COMPortDropDown = uidropdown(app.MainTab);
+            app.COMPortDropDown.FontSize = 14;
+            app.COMPortDropDown.FontWeight = 'bold';
+            app.COMPortDropDown.Position = [446 71 100 22];
 
-            % Create SavelogfileButton
-            app.SavelogfileButton = uibutton(app.DeveloperModeTab, 'push');
-            app.SavelogfileButton.ButtonPushedFcn = createCallbackFcn(app, @SavelogfileButtonPushed, true);
-            app.SavelogfileButton.Position = [391 63 100 23];
-            app.SavelogfileButton.Text = 'Save log file';
+            % Create ClearDataButton
+            app.ClearDataButton = uibutton(app.MainTab, 'push');
+            app.ClearDataButton.ButtonPushedFcn = createCallbackFcn(app, @ClearDataButtonPushed, true);
+            app.ClearDataButton.FontSize = 14;
+            app.ClearDataButton.FontWeight = 'bold';
+            app.ClearDataButton.Position = [957 63 127 30];
+            app.ClearDataButton.Text = 'Clear Data';
+
+            % Create ExportDataButton
+            app.ExportDataButton = uibutton(app.MainTab, 'push');
+            app.ExportDataButton.ButtonPushedFcn = createCallbackFcn(app, @ExportDataButtonPushed, true);
+            app.ExportDataButton.FontSize = 14;
+            app.ExportDataButton.FontWeight = 'bold';
+            app.ExportDataButton.Position = [661 63 127 30];
+            app.ExportDataButton.Text = 'Export Data';
+
+            % Create DeveloperOptionsTab
+            app.DeveloperOptionsTab = uitab(app.TabGroup2);
+            app.DeveloperOptionsTab.Title = 'Developer Options';
+
+            % Create SimulateDataCheckBox
+            app.SimulateDataCheckBox = uicheckbox(app.DeveloperOptionsTab);
+            app.SimulateDataCheckBox.Text = 'Simulate Data?';
+            app.SimulateDataCheckBox.Position = [26 396 104 22];
 
             % Show the figure after all components are created
             app.UIFigure.Visible = 'on';
