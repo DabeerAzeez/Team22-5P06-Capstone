@@ -315,7 +315,6 @@ classdef CCTA_exported < matlab.apps.AppBase
                     idn = "Unknown Device";
                 end
 
-
                 portInfo{i} = sprintf('%s: %s', ports(i), idn);
             end
 
@@ -337,7 +336,9 @@ classdef CCTA_exported < matlab.apps.AppBase
                 app.CONNECTButton.Text = "DISCONNECT";
                 app.CONNECTButton.BackgroundColor = 'red';
 
-                app.arduinoObj = serialport(app.COMPortDropDown.Value, 9600);
+                if app.SimulateDataCheckBox.Value == false
+                    app.arduinoObj = serialport(app.COMPortDropDown.Value, 9600);
+                end
                 app.clearDataArrays();
     
                 tic;
