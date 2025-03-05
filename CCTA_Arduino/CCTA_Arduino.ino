@@ -10,21 +10,21 @@
 // TODO: Rename the flow/pressure sensor pins based on the specific locations (e.g. IVC/SVC)? Depends on how we implement modularity
 
 // Pin definitions
-const unsigned char FLOW_SENSOR_PIN1 = 2;         // First flow sensor input pin
-const unsigned char FLOW_SENSOR_PIN2 = 3;         // Second flow sensor input pin
+const unsigned char FLOW_SENSOR_PIN1 = 1;         // First flow sensor input pin
+const unsigned char FLOW_SENSOR_PIN2 = 2;         // Second flow sensor input pin
 const unsigned char PRESSURE_MOTOR_DIR_PIN = 4;   // Pressure valve control motor direction pin
 const unsigned char PRESSURE_MOTOR_STEP_PIN = 5;  // Pressure valve control motor step pin
-const unsigned char PRESSURE_SENSOR_PIN1 = A0;    // First pressure sensor input pin
-const unsigned char PRESSURE_SENSOR_PIN2 = A1;    // Second pressure sensor input pin
-const unsigned char PRESSURE_SENSOR_PIN3 = A2;    // Third pressure sensor input pin
+const unsigned char PRESSURE_SENSOR_PIN1 = A1;    // First pressure sensor input pin
+const unsigned char PRESSURE_SENSOR_PIN2 = A2;    // Second pressure sensor input pin
+const unsigned char PRESSURE_SENSOR_PIN3 = A3;    // Third pressure sensor input pin
 
 // Other constants
 const unsigned long PRESSURE_SENSOR_READ_INTERVAL = 50.;  // Interval for pressure readings (ms)
 const unsigned long FLOW_SENSOR_READ_INTERVAL = 2000.;    // Interval for flow readings (ms); assumed to be many times larger than PRESSURE_SENSOR_READ_INTERVAL
 
 const float DEG_PER_STEP = 1.8;  // For pressure valve control motor
-const int STEPS_PER_REV = 200;  // assuming # of microsteps is 1
-const int MAX_ROTATIONS = 7;  // of needle valve
+const int STEPS_PER_REV = 200;   // assuming # of microsteps is 1
+const int MAX_ROTATIONS = 7;     // of needle valve
 const int MAX_STEPS = STEPS_PER_REV * MAX_ROTATIONS;
 
 // Variables
@@ -39,8 +39,9 @@ int pressureValueRaw1 = 0, pressureValueRaw2 = 0, pressureValueRaw3 = 0;
 float pressureValue1 = 0, pressureValue2 = 0, pressureValue3 = 0;
 char newFlowIndicator = 'N';  // Indicates whether a new flow reading is available
 
-float pressureMotorStepNumber = 0;  // For controlling the pressure valve motor
-int flowVoltage = 0;  // For controlling the pump
+int pressureMotorStepNumber = 0;  // For controlling the pressure valve motor
+int pressureMotorDelayMicroseconds;  // time off for pressure motor per stepper motor pulse;  3500 (normal) / 25000 (resetting)
+int flowVoltage = 0;              // For controlling the pump
 
 /**
  * Interrupt service routines for the flow sensors.
@@ -78,7 +79,10 @@ void setup() {
   flowSensorTime = currentTime;
   pressureSensorTime = currentTime;
 
-  Serial.println("RESET");
+  // pressureMotorDelayMicroseconds = 10000;     // slow down while resetting so motor isn't damaged when valve locks 
+  // rotateMotorByStep(-MAX_STEPS);              // reset valve position to 100% closed
+  // rotateMotorByStep(round(MAX_STEPS * 0.7));  // Move to 30% closed (tough to spin valve at values lower than this)
+  // pressureMotorDelayMicroseconds = 3500;      // speed up for normal use
 }
 
 /**
@@ -125,8 +129,8 @@ void loop() {
  * @param targetStep - The absolute step number to move to.
  */
 void rotateMotorToStep(int targetStep) {
-    int stepsToMove = targetStep - pressureMotorStepNumber;
-    rotateMotorByStep(stepsToMove);
+  int stepsToMove = targetStep - pressureMotorStepNumber;
+  rotateMotorByStep(stepsToMove);
 }
 
 /**
@@ -135,15 +139,15 @@ void rotateMotorToStep(int targetStep) {
  * @param steps - The number of steps to move (positive for CW, negative for CCW).
  */
 void rotateMotorByStep(int steps) {
-    digitalWrite(PRESSURE_MOTOR_DIR_PIN, steps > 0 ? HIGH : LOW);   // Choose direction based on sign of "steps"
-    
-    for (int i = 0; i < abs(steps); i++) {
-        digitalWrite(PRESSURE_MOTOR_STEP_PIN, HIGH);
-        delayMicroseconds(350);
-        digitalWrite(PRESSURE_MOTOR_STEP_PIN, LOW);
-        delayMicroseconds(3000);
-    }
-    pressureMotorStepNumber += steps;
+  digitalWrite(PRESSURE_MOTOR_DIR_PIN, steps > 0 ? HIGH : LOW);  // Choose direction based on sign of "steps"
+
+  for (int i = 0; i < abs(steps); i++) {
+    digitalWrite(PRESSURE_MOTOR_STEP_PIN, HIGH);
+    delayMicroseconds(350);
+    digitalWrite(PRESSURE_MOTOR_STEP_PIN, LOW);
+    delayMicroseconds(pressureMotorDelayMicroseconds); 
+  }
+  pressureMotorStepNumber += steps;
 }
 
 /**
@@ -152,8 +156,8 @@ void rotateMotorByStep(int steps) {
  * @param targetAngle - The absolute angle to move to.
  */
 void rotateMotorToAngle(float targetAngle) {
-    int targetStep = round((targetAngle / 360.0) * STEPS_PER_REV);
-    rotateMotorToStep(targetStep);
+  int targetStep = round((targetAngle / 360.0) * STEPS_PER_REV);
+  rotateMotorToStep(targetStep);
 }
 
 /**
@@ -162,31 +166,35 @@ void rotateMotorToAngle(float targetAngle) {
  * @param degrees - The number of degrees to rotate (positive for CW, negative for CCW).
  */
 void rotateMotorByAngle(float degrees) {
-    int steps = round((degrees / 360.0) * STEPS_PER_REV);
-    rotateMotorByStep(steps);
+  int steps = round((degrees / 360.0) * STEPS_PER_REV);
+  rotateMotorByStep(steps);
 }
 
 /*
  * Processes incoming serial commands to control relevant outputs. Currently supports just the motor for the pressure valve. 
- * Assumes Example string: "Pressure Motor: 50, Flow Motor: 50"
-*/
-/*
-Example string: "Pressure Motor: 50, Flow Motor: 50"
+ * Assumes Example string: "Pressure Motor Step Number: 50, Flow Motor Voltage: 50"
 */
 void processSerial() {
-  char command[50];  // Buffer for input string
-  int index = 0;
+  String command = Serial.readStringUntil("\n");
 
-  while (Serial.available() > 0 && index < 49) {
-    char c = Serial.read();
-    if (c == '\n') break;  // Stop at newline
-    command[index++] = c;
-  }
-  command[index] = '\0';  // Null-terminate string
+  // Manually split the string by newline since readBytesUntil doesn't seem to work properly
+  int newlineIndex = command.indexOf('\n');
+  while (newlineIndex != -1) {
+    // Extract the line up to the newline
+    String line = command.substring(0, newlineIndex);
+    line.trim();
 
-  // Parse values
-  if (sscanf(command, "Pressure Motor Step Number: %d, Flow Motor Voltage: %d", &pressureMotorStepNumber, &flowVoltage) == 2) {
-    rotateMotorToStep(pressureMotorStepNumber);
+    // Parse each line
+    int stepNumber;
+    if (sscanf(line.c_str(), "Pressure Motor Step Number: %d, Flow Motor Voltage: %d", &stepNumber, &flowVoltage) == 2) {
+      rotateMotorToStep(stepNumber);
+    }
+
+    // Remove this line (and the newline character) from 'command'
+    command.remove(0, newlineIndex + 1);
+
+    // Check if there's another newline in the remaining string
+    newlineIndex = command.indexOf('\n');
   }
 }
 
@@ -226,8 +234,9 @@ float interpolatePressure(float adc_value, int sensor) {
   static const float voltage_V2[8] = { 117, 175, 363, 576, 700, 856, 960, 967 };
   static const float pressure_mmHg2[8] = { 2.2, 24.0, 48.7, 75.0, 91.5, 111.0, 128.2, 151.5 };
 
-  static const float voltage_V_default[1] = { 0 };
-  static const float pressure_mmHg_default[1] = { 0 };
+  // Copied from sensor 2, should recalibrate it
+  static const float voltage_V3[8] = { 117, 175, 363, 576, 700, 856, 960, 967 };
+  static const float pressure_mmHg3[8] = { 2.2, 24.0, 48.7, 75.0, 91.5, 111.0, 128.2, 151.5 };
 
   if (sensor == 1) {
     voltage_V = voltage_V1;
@@ -238,9 +247,9 @@ float interpolatePressure(float adc_value, int sensor) {
     pressure_mmHg = pressure_mmHg2;
     size = 8;
   } else {
-    voltage_V = voltage_V_default;
-    pressure_mmHg = pressure_mmHg_default;
-    size = 1;
+    voltage_V = voltage_V3;
+    pressure_mmHg = pressure_mmHg3;
+    size = 8;
   }
 
   if (adc_value <= voltage_V[0]) {

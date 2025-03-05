@@ -3,8 +3,8 @@
   More info: https://www.makerguides.com */
 
 // Define stepper motor connections:
-#define PRESSURE_MOTOR_DIR_PIN 2
-#define PRESSURE_MOTOR_STEP_PIN 3
+#define PRESSURE_MOTOR_DIR_PIN 4
+#define PRESSURE_MOTOR_STEP_PIN 5
 
 const float DEG_PER_STEP = 1.8;
 const int STEPS_PER_REV = 200;
