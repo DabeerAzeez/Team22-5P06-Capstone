@@ -5,17 +5,20 @@ classdef CCTA_exported < matlab.apps.AppBase
         UIFigure                        matlab.ui.Figure
         TabGroup2                       matlab.ui.container.TabGroup
         MainTab                         matlab.ui.container.Tab
+        ConnectedLamp                   matlab.ui.control.Lamp
+        COMPortDropDown                 matlab.ui.control.DropDown
+        COMPortLabel                    matlab.ui.control.Label
+        GraphOptionsLabel               matlab.ui.control.Label
         RefreshListButton               matlab.ui.control.Button
-        OPENVALVEButton                 matlab.ui.control.Button
         ExportDataButton                matlab.ui.control.Button
         ClearDataButton                 matlab.ui.control.Button
-        COMPortDropDown                 matlab.ui.control.DropDown
-        COMPortDropDownLabel            matlab.ui.control.Label
-        CONNECTButton                   matlab.ui.control.Button
+        ConnectButton                   matlab.ui.control.Button
         HoldGraphsButton                matlab.ui.control.StateButton
-        PUMPOFFButton                   matlab.ui.control.Button
-        PUMPONButton                    matlab.ui.control.Button
+        Panel                           matlab.ui.container.Panel
+        FlowAxes                        matlab.ui.control.UIAxes
+        PressureAxes                    matlab.ui.control.UIAxes
         FlowMonitoringControlPanel      matlab.ui.container.Panel
+        ClearSetpointsButton_2          matlab.ui.control.Button
         SensorLabel_2                   matlab.ui.control.Label
         GraphLabel_2                    matlab.ui.control.Label
         Flow1_GraphEnable               matlab.ui.control.CheckBox
@@ -50,9 +53,15 @@ classdef CCTA_exported < matlab.apps.AppBase
         Pressure2_SetPoint              matlab.ui.control.NumericEditField
         Pressure1_SetPoint              matlab.ui.control.NumericEditField
         Label                           matlab.ui.control.Label
-        FlowAxes                        matlab.ui.control.UIAxes
-        PressureAxes                    matlab.ui.control.UIAxes
-        DeveloperOptionsTab             matlab.ui.container.Tab
+        SettingsTab                     matlab.ui.container.Tab
+        FlowPumpControlPanel            matlab.ui.container.Panel
+        PumpPowerSlider                 matlab.ui.control.Slider
+        PumpPowerSliderLabel            matlab.ui.control.Label
+        AnalogWriteValueEditField       matlab.ui.control.NumericEditField
+        AnalogWriteValueEditFieldLabel  matlab.ui.control.Label
+        OPENVALVEButton                 matlab.ui.control.Button
+        PUMPOFFButton                   matlab.ui.control.Button
+        PUMPONButton                    matlab.ui.control.Button
         PressureValveControlPanel       matlab.ui.container.Panel
         ClosedSlider                    matlab.ui.control.Slider
         ClosedSliderLabel               matlab.ui.control.Label
@@ -66,6 +75,7 @@ classdef CCTA_exported < matlab.apps.AppBase
     properties (Access = private)
         plot_raw_data = true;
         F_REFRESH = 20;  % App refresh rate (Hz)
+        ARDUINO_ANALOGWRITE_MAX = 255;
 
         arduinoObj;
         tempLogFile = fullfile(pwd, 'console_output_temp.txt');  % Define a persistent temporary log file that always stores session history
@@ -87,7 +97,7 @@ classdef CCTA_exported < matlab.apps.AppBase
         
         pressureMotorPosition = 0;
         MAX_PRESSURE_MOTOR_POSITION = -200*7;  % 7 rotations, 200 steps per rotation; TODO: read in max stepper value from Arduino instead of hard-coding to 7 rotations
-        flowVoltage = 0;
+        flowDutyCycle = 0;
 
         PID_setpoint_id = "None";  % Identifier as to which sensor's setpoint is influencing PID control, since only one sensor at a time can do so
         PID_setpoint = 0;
@@ -327,7 +337,7 @@ classdef CCTA_exported < matlab.apps.AppBase
                 % app.updatePIDOutputs(pressure_value1, flow_value1);  
 
                 % Check whether disconnect button has been clicked
-                if app.CONNECTButton.Text == "CONNECT"
+                if app.ConnectButton.Text == "CONNECT"
                     break
                 end
 
@@ -338,7 +348,7 @@ classdef CCTA_exported < matlab.apps.AppBase
         
         function sendPIDOutputsToArduino(app)
             app.MotorStepNumberEditField.Value = app.pressureMotorPosition;
-            line = sprintf("Pressure Motor Step Number: %d, Flow Motor Voltage: %d",app.pressureMotorPosition,app.flowVoltage);
+            line = sprintf("Pressure Motor Step Number: %d, Pump Duty Cycle: %d",app.pressureMotorPosition,app.flowDutyCycle);
             app.arduinoObj.writeline(line)
 
             % TODO: based on setpoint ID
@@ -420,13 +430,13 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.MotorStepNumberEditField.Limits = [app.MAX_PRESSURE_MOTOR_POSITION 0];
         end
 
-        % Button pushed function: CONNECTButton
-        function CONNECTButtonPushed(app, event)
+        % Button pushed function: ConnectButton
+        function ConnectButtonPushed(app, event)
             
-            if app.CONNECTButton.Text == "CONNECT"
+            if app.ConnectButton.Text == "Connect"
                 % Someone just connected to the serial device
-                app.CONNECTButton.Text = "DISCONNECT";
-                app.CONNECTButton.BackgroundColor = 'red';
+                app.ConnectButton.Text = "Disconnect";
+                app.ConnectedLamp.Color = "green";
 
                 if app.SimulateDataCheckBox.Value == false
                     app.arduinoObj = serialport(app.COMPortDropDown.Value, 9600);
@@ -442,12 +452,12 @@ classdef CCTA_exported < matlab.apps.AppBase
                 app.startLogging();
                 app.runMainLoop();
 
-            elseif app.CONNECTButton.Text == "DISCONNECT"
+            elseif app.ConnectButton.Text == "Disconnect"
                 % Someone just disconnected from the serial device
                 app.arduinoObj = [];
                 app.setValveControlPanelEnabled(false);
-                app.CONNECTButton.Text = "CONNECT";
-                app.CONNECTButton.BackgroundColor = 'green';
+                app.ConnectButton.Text = "Connect";
+                app.ConnectedLamp.Color = [0.80,0.80,0.80];
             else
                 error("Connect button container contains invalid text.")
             end
@@ -533,6 +543,21 @@ classdef CCTA_exported < matlab.apps.AppBase
         function RefreshListButtonPushed(app, event)
             app.updateSerialPortList();
         end
+
+        % Value changed function: PumpPowerSlider
+        function PumpPowerSliderValueChanged(app, event)
+            app.flowDutyCycle = round(app.PumpPowerSlider.Value/app.PumpPowerSlider.Limits(2)*app.ARDUINO_ANALOGWRITE_MAX);
+            app.sendPIDOutputsToArduino();
+        end
+
+        % Value changed function: AnalogWriteValueEditField
+        function AnalogWriteValueEditFieldValueChanged(app, event)
+            value = app.AnalogWriteValueEditField.Value;
+
+            app.flowDutyCycle = value;
+            app.PumpPowerSlider.Value = value/app.ARDUINO_ANALOGWRITE_MAX * app.PumpPowerSlider.Limits(2);  % update slider
+            app.sendPIDOutputsToArduino();
+        end
     end
 
     % Component initialization
@@ -543,38 +568,23 @@ classdef CCTA_exported < matlab.apps.AppBase
 
             % Create UIFigure and hide until all components are created
             app.UIFigure = uifigure('Visible', 'off');
-            app.UIFigure.Position = [100 100 1228 463];
+            app.UIFigure.Position = [100 100 1228 522];
             app.UIFigure.Name = 'MATLAB App';
 
             % Create TabGroup2
             app.TabGroup2 = uitabgroup(app.UIFigure);
-            app.TabGroup2.Position = [1 3 1229 461];
+            app.TabGroup2.Position = [1 -1 1229 524];
 
             % Create MainTab
             app.MainTab = uitab(app.TabGroup2);
             app.MainTab.Title = 'Main';
 
-            % Create PressureAxes
-            app.PressureAxes = uiaxes(app.MainTab);
-            title(app.PressureAxes, 'Pressure Data')
-            xlabel(app.PressureAxes, 'Time (s)')
-            ylabel(app.PressureAxes, 'Pressure (mmHg)')
-            zlabel(app.PressureAxes, 'Z')
-            app.PressureAxes.Position = [361 144 373 270];
-
-            % Create FlowAxes
-            app.FlowAxes = uiaxes(app.MainTab);
-            title(app.FlowAxes, 'Flow Data')
-            xlabel(app.FlowAxes, 'Time(s)')
-            ylabel(app.FlowAxes, 'Flow (L/min)')
-            zlabel(app.FlowAxes, 'Z')
-            app.FlowAxes.Position = [787 144 410 270];
-
             % Create PressureMonitoringControlPanel
             app.PressureMonitoringControlPanel = uipanel(app.MainTab);
             app.PressureMonitoringControlPanel.Title = 'Pressure Monitoring & Control';
+            app.PressureMonitoringControlPanel.BackgroundColor = [0.902 0.902 0.902];
             app.PressureMonitoringControlPanel.FontWeight = 'bold';
-            app.PressureMonitoringControlPanel.Position = [38 234 298 181];
+            app.PressureMonitoringControlPanel.Position = [15 307 298 181];
 
             % Create Label
             app.Label = uilabel(app.PressureMonitoringControlPanel);
@@ -647,7 +657,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             % Create allvaluesinmmHgLabel
             app.allvaluesinmmHgLabel = uilabel(app.PressureMonitoringControlPanel);
             app.allvaluesinmmHgLabel.FontAngle = 'italic';
-            app.allvaluesinmmHgLabel.Position = [184 159 114 22];
+            app.allvaluesinmmHgLabel.Position = [183 159 114 22];
             app.allvaluesinmmHgLabel.Text = '(all values in mmHg)';
 
             % Create SensorLabel
@@ -689,8 +699,9 @@ classdef CCTA_exported < matlab.apps.AppBase
             % Create FlowMonitoringControlPanel
             app.FlowMonitoringControlPanel = uipanel(app.MainTab);
             app.FlowMonitoringControlPanel.Title = 'Flow Monitoring & Control';
+            app.FlowMonitoringControlPanel.BackgroundColor = [0.902 0.902 0.902];
             app.FlowMonitoringControlPanel.FontWeight = 'bold';
-            app.FlowMonitoringControlPanel.Position = [38 70 298 143];
+            app.FlowMonitoringControlPanel.Position = [15 153 298 143];
 
             % Create Label_2
             app.Label_2 = uilabel(app.FlowMonitoringControlPanel);
@@ -711,12 +722,14 @@ classdef CCTA_exported < matlab.apps.AppBase
 
             % Create CurrentLabel_2
             app.CurrentLabel_2 = uilabel(app.FlowMonitoringControlPanel);
-            app.CurrentLabel_2.Position = [80 93 45 22];
+            app.CurrentLabel_2.FontWeight = 'bold';
+            app.CurrentLabel_2.Position = [80 93 48 22];
             app.CurrentLabel_2.Text = 'Current';
 
             % Create SetpointLabel_2
             app.SetpointLabel_2 = uilabel(app.FlowMonitoringControlPanel);
-            app.SetpointLabel_2.Position = [170 93 49 22];
+            app.SetpointLabel_2.FontWeight = 'bold';
+            app.SetpointLabel_2.Position = [170 93 53 22];
             app.SetpointLabel_2.Text = 'Setpoint';
 
             % Create Label_3
@@ -744,7 +757,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             % Create allvaluesinLminLabel
             app.allvaluesinLminLabel = uilabel(app.FlowMonitoringControlPanel);
             app.allvaluesinLminLabel.FontAngle = 'italic';
-            app.allvaluesinLminLabel.Position = [190 121 108 22];
+            app.allvaluesinLminLabel.Position = [189 121 108 22];
             app.allvaluesinLminLabel.Text = '(all values in L/min)';
 
             % Create Flow2_GraphEnable
@@ -767,102 +780,131 @@ classdef CCTA_exported < matlab.apps.AppBase
             % Create SensorLabel_2
             app.SensorLabel_2 = uilabel(app.FlowMonitoringControlPanel);
             app.SensorLabel_2.FontWeight = 'bold';
-            app.SensorLabel_2.Position = [12 100 56 22];
+            app.SensorLabel_2.Position = [11 93 56 22];
             app.SensorLabel_2.Text = 'Sensor #';
 
-            % Create PUMPONButton
-            app.PUMPONButton = uibutton(app.MainTab, 'push');
-            app.PUMPONButton.BackgroundColor = [0.4667 0.6745 0.1882];
-            app.PUMPONButton.FontWeight = 'bold';
-            app.PUMPONButton.Enable = 'off';
-            app.PUMPONButton.Position = [39 32 80 22];
-            app.PUMPONButton.Text = 'PUMP ON';
+            % Create ClearSetpointsButton_2
+            app.ClearSetpointsButton_2 = uibutton(app.FlowMonitoringControlPanel, 'push');
+            app.ClearSetpointsButton_2.FontSize = 10;
+            app.ClearSetpointsButton_2.Position = [154 9 84 23];
+            app.ClearSetpointsButton_2.Text = 'Clear Setpoints';
 
-            % Create PUMPOFFButton
-            app.PUMPOFFButton = uibutton(app.MainTab, 'push');
-            app.PUMPOFFButton.BackgroundColor = [1 0 0];
-            app.PUMPOFFButton.FontWeight = 'bold';
-            app.PUMPOFFButton.Enable = 'off';
-            app.PUMPOFFButton.Position = [145 31 79 21];
-            app.PUMPOFFButton.Text = 'PUMP OFF';
+            % Create Panel
+            app.Panel = uipanel(app.MainTab);
+            app.Panel.BorderColor = [0.651 0.651 0.651];
+            app.Panel.BackgroundColor = [0.8 0.8 0.8];
+            app.Panel.FontAngle = 'italic';
+            app.Panel.Position = [332 154 883 333];
+
+            % Create PressureAxes
+            app.PressureAxes = uiaxes(app.Panel);
+            title(app.PressureAxes, 'Pressure Data')
+            xlabel(app.PressureAxes, 'Time (s)')
+            ylabel(app.PressureAxes, 'Pressure (mmHg)')
+            zlabel(app.PressureAxes, 'Z')
+            app.PressureAxes.FontWeight = 'bold';
+            app.PressureAxes.FontSize = 14;
+            app.PressureAxes.Position = [12 9 409 312];
+
+            % Create FlowAxes
+            app.FlowAxes = uiaxes(app.Panel);
+            title(app.FlowAxes, 'Flow Data')
+            xlabel(app.FlowAxes, 'Time(s)')
+            ylabel(app.FlowAxes, 'Flow (L/min)')
+            zlabel(app.FlowAxes, 'Z')
+            app.FlowAxes.FontWeight = 'bold';
+            app.FlowAxes.FontSize = 14;
+            app.FlowAxes.Position = [435 9 437 312];
 
             % Create HoldGraphsButton
             app.HoldGraphsButton = uibutton(app.MainTab, 'state');
             app.HoldGraphsButton.Text = 'Hold Graphs';
-            app.HoldGraphsButton.BackgroundColor = [0.9412 0.9412 0.9412];
+            app.HoldGraphsButton.BackgroundColor = [0.1569 0.5725 0.8431];
             app.HoldGraphsButton.FontSize = 14;
             app.HoldGraphsButton.FontWeight = 'bold';
-            app.HoldGraphsButton.Position = [807 63 125 30];
+            app.HoldGraphsButton.FontColor = [1 1 1];
+            app.HoldGraphsButton.Position = [791 40 126 31];
 
-            % Create CONNECTButton
-            app.CONNECTButton = uibutton(app.MainTab, 'push');
-            app.CONNECTButton.ButtonPushedFcn = createCallbackFcn(app, @CONNECTButtonPushed, true);
-            app.CONNECTButton.BackgroundColor = [0 1 0];
-            app.CONNECTButton.FontSize = 14;
-            app.CONNECTButton.FontWeight = 'bold';
-            app.CONNECTButton.Position = [446 56 102 25];
-            app.CONNECTButton.Text = 'CONNECT';
-
-            % Create COMPortDropDownLabel
-            app.COMPortDropDownLabel = uilabel(app.MainTab);
-            app.COMPortDropDownLabel.HorizontalAlignment = 'right';
-            app.COMPortDropDownLabel.FontSize = 14;
-            app.COMPortDropDownLabel.FontWeight = 'bold';
-            app.COMPortDropDownLabel.Position = [361 90 70 22];
-            app.COMPortDropDownLabel.Text = 'COM Port';
-
-            % Create COMPortDropDown
-            app.COMPortDropDown = uidropdown(app.MainTab);
-            app.COMPortDropDown.FontSize = 14;
-            app.COMPortDropDown.FontWeight = 'bold';
-            app.COMPortDropDown.Position = [446 90 100 22];
+            % Create ConnectButton
+            app.ConnectButton = uibutton(app.MainTab, 'push');
+            app.ConnectButton.ButtonPushedFcn = createCallbackFcn(app, @ConnectButtonPushed, true);
+            app.ConnectButton.BackgroundColor = [0.9529 0.5725 0.2157];
+            app.ConnectButton.FontSize = 14;
+            app.ConnectButton.FontWeight = 'bold';
+            app.ConnectButton.Position = [929 79 126 31];
+            app.ConnectButton.Text = 'Connect';
 
             % Create ClearDataButton
             app.ClearDataButton = uibutton(app.MainTab, 'push');
             app.ClearDataButton.ButtonPushedFcn = createCallbackFcn(app, @ClearDataButtonPushed, true);
+            app.ClearDataButton.BackgroundColor = [0.1569 0.5725 0.8431];
             app.ClearDataButton.FontSize = 14;
             app.ClearDataButton.FontWeight = 'bold';
-            app.ClearDataButton.Position = [957 63 127 30];
+            app.ClearDataButton.FontColor = [1 1 1];
+            app.ClearDataButton.Position = [653 40 126 31];
             app.ClearDataButton.Text = 'Clear Data';
 
             % Create ExportDataButton
             app.ExportDataButton = uibutton(app.MainTab, 'push');
             app.ExportDataButton.ButtonPushedFcn = createCallbackFcn(app, @ExportDataButtonPushed, true);
+            app.ExportDataButton.BackgroundColor = [0.1569 0.5725 0.8431];
             app.ExportDataButton.FontSize = 14;
             app.ExportDataButton.FontWeight = 'bold';
-            app.ExportDataButton.Position = [661 63 127 30];
+            app.ExportDataButton.FontColor = [1 1 1];
+            app.ExportDataButton.Position = [929 40 126 31];
             app.ExportDataButton.Text = 'Export Data';
-
-            % Create OPENVALVEButton
-            app.OPENVALVEButton = uibutton(app.MainTab, 'push');
-            app.OPENVALVEButton.BackgroundColor = [0.9294 0.6941 0.1255];
-            app.OPENVALVEButton.FontWeight = 'bold';
-            app.OPENVALVEButton.Enable = 'off';
-            app.OPENVALVEButton.Position = [244 30 91 23];
-            app.OPENVALVEButton.Text = 'OPEN VALVE';
 
             % Create RefreshListButton
             app.RefreshListButton = uibutton(app.MainTab, 'push');
             app.RefreshListButton.ButtonPushedFcn = createCallbackFcn(app, @RefreshListButtonPushed, true);
-            app.RefreshListButton.BackgroundColor = [0.9412 0.9412 0.9412];
+            app.RefreshListButton.BackgroundColor = [0.9529 0.5725 0.2157];
             app.RefreshListButton.FontSize = 14;
             app.RefreshListButton.FontWeight = 'bold';
-            app.RefreshListButton.Position = [446 22 102 25];
+            app.RefreshListButton.Position = [791 79 126 31];
             app.RefreshListButton.Text = 'Refresh List';
 
-            % Create DeveloperOptionsTab
-            app.DeveloperOptionsTab = uitab(app.TabGroup2);
-            app.DeveloperOptionsTab.Title = 'Developer Options';
+            % Create GraphOptionsLabel
+            app.GraphOptionsLabel = uilabel(app.MainTab);
+            app.GraphOptionsLabel.FontSize = 18;
+            app.GraphOptionsLabel.FontWeight = 'bold';
+            app.GraphOptionsLabel.FontColor = [0.1569 0.5725 0.8431];
+            app.GraphOptionsLabel.Position = [505 43 131 28];
+            app.GraphOptionsLabel.Text = 'Graph Options';
+
+            % Create COMPortLabel
+            app.COMPortLabel = uilabel(app.MainTab);
+            app.COMPortLabel.HorizontalAlignment = 'right';
+            app.COMPortLabel.FontSize = 18;
+            app.COMPortLabel.FontWeight = 'bold';
+            app.COMPortLabel.FontColor = [0.9529 0.5725 0.2157];
+            app.COMPortLabel.Position = [541 82 93 23];
+            app.COMPortLabel.Text = 'COM Port ';
+
+            % Create COMPortDropDown
+            app.COMPortDropDown = uidropdown(app.MainTab);
+            app.COMPortDropDown.FontSize = 14;
+            app.COMPortDropDown.FontWeight = 'bold';
+            app.COMPortDropDown.BackgroundColor = [0.9529 0.5725 0.2157];
+            app.COMPortDropDown.Position = [653 79 126 31];
+
+            % Create ConnectedLamp
+            app.ConnectedLamp = uilamp(app.MainTab);
+            app.ConnectedLamp.Position = [1064 84 20 20];
+            app.ConnectedLamp.Color = [0.8 0.8 0.8];
+
+            % Create SettingsTab
+            app.SettingsTab = uitab(app.TabGroup2);
+            app.SettingsTab.Title = 'Settings';
 
             % Create SimulateDataCheckBox
-            app.SimulateDataCheckBox = uicheckbox(app.DeveloperOptionsTab);
+            app.SimulateDataCheckBox = uicheckbox(app.SettingsTab);
             app.SimulateDataCheckBox.Text = 'Simulate Data?';
-            app.SimulateDataCheckBox.Position = [26 396 104 22];
+            app.SimulateDataCheckBox.Position = [26 459 104 22];
 
             % Create PressureValveControlPanel
-            app.PressureValveControlPanel = uipanel(app.DeveloperOptionsTab);
+            app.PressureValveControlPanel = uipanel(app.SettingsTab);
             app.PressureValveControlPanel.Title = 'Pressure Valve Control';
-            app.PressureValveControlPanel.Position = [26 233 260 141];
+            app.PressureValveControlPanel.Position = [26 296 260 141];
 
             % Create MotorStepNumberEditFieldLabel
             app.MotorStepNumberEditFieldLabel = uilabel(app.PressureValveControlPanel);
@@ -891,6 +933,66 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.ClosedSlider.ValueChangedFcn = createCallbackFcn(app, @ClosedSliderValueChanged, true);
             app.ClosedSlider.Enable = 'off';
             app.ClosedSlider.Position = [86 42 150 3];
+
+            % Create PUMPONButton
+            app.PUMPONButton = uibutton(app.SettingsTab, 'push');
+            app.PUMPONButton.BackgroundColor = [0.4667 0.6745 0.1882];
+            app.PUMPONButton.FontSize = 14;
+            app.PUMPONButton.FontWeight = 'bold';
+            app.PUMPONButton.Enable = 'off';
+            app.PUMPONButton.Position = [25 248 130 28];
+            app.PUMPONButton.Text = 'PUMP ON';
+
+            % Create PUMPOFFButton
+            app.PUMPOFFButton = uibutton(app.SettingsTab, 'push');
+            app.PUMPOFFButton.BackgroundColor = [1 0 0];
+            app.PUMPOFFButton.FontSize = 14;
+            app.PUMPOFFButton.FontWeight = 'bold';
+            app.PUMPOFFButton.Enable = 'off';
+            app.PUMPOFFButton.Position = [170 248 129 29];
+            app.PUMPOFFButton.Text = 'PUMP OFF';
+
+            % Create OPENVALVEButton
+            app.OPENVALVEButton = uibutton(app.SettingsTab, 'push');
+            app.OPENVALVEButton.BackgroundColor = [0.9294 0.6941 0.1255];
+            app.OPENVALVEButton.FontSize = 14;
+            app.OPENVALVEButton.FontWeight = 'bold';
+            app.OPENVALVEButton.Enable = 'off';
+            app.OPENVALVEButton.Position = [23 205 129 29];
+            app.OPENVALVEButton.Text = 'OPEN VALVE';
+
+            % Create FlowPumpControlPanel
+            app.FlowPumpControlPanel = uipanel(app.SettingsTab);
+            app.FlowPumpControlPanel.Title = 'Flow Pump Control';
+            app.FlowPumpControlPanel.Position = [313 297 306 141];
+
+            % Create AnalogWriteValueEditFieldLabel
+            app.AnalogWriteValueEditFieldLabel = uilabel(app.FlowPumpControlPanel);
+            app.AnalogWriteValueEditFieldLabel.HorizontalAlignment = 'right';
+            app.AnalogWriteValueEditFieldLabel.Enable = 'off';
+            app.AnalogWriteValueEditFieldLabel.Position = [58 78 107 22];
+            app.AnalogWriteValueEditFieldLabel.Text = 'Analog Write Value';
+
+            % Create AnalogWriteValueEditField
+            app.AnalogWriteValueEditField = uieditfield(app.FlowPumpControlPanel, 'numeric');
+            app.AnalogWriteValueEditField.Limits = [0 255];
+            app.AnalogWriteValueEditField.RoundFractionalValues = 'on';
+            app.AnalogWriteValueEditField.ValueChangedFcn = createCallbackFcn(app, @AnalogWriteValueEditFieldValueChanged, true);
+            app.AnalogWriteValueEditField.Enable = 'off';
+            app.AnalogWriteValueEditField.Position = [180 78 100 22];
+
+            % Create PumpPowerSliderLabel
+            app.PumpPowerSliderLabel = uilabel(app.FlowPumpControlPanel);
+            app.PumpPowerSliderLabel.HorizontalAlignment = 'right';
+            app.PumpPowerSliderLabel.Enable = 'off';
+            app.PumpPowerSliderLabel.Position = [17 33 91 22];
+            app.PumpPowerSliderLabel.Text = 'Pump Power  %';
+
+            % Create PumpPowerSlider
+            app.PumpPowerSlider = uislider(app.FlowPumpControlPanel);
+            app.PumpPowerSlider.ValueChangedFcn = createCallbackFcn(app, @PumpPowerSliderValueChanged, true);
+            app.PumpPowerSlider.Enable = 'off';
+            app.PumpPowerSlider.Position = [129 42 150 3];
 
             % Show the figure after all components are created
             app.UIFigure.Visible = 'on';

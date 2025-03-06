@@ -14,6 +14,9 @@ const unsigned char FLOW_SENSOR_PIN1 = 1;         // First flow sensor input pin
 const unsigned char FLOW_SENSOR_PIN2 = 2;         // Second flow sensor input pin
 const unsigned char PRESSURE_MOTOR_DIR_PIN = 4;   // Pressure valve control motor direction pin
 const unsigned char PRESSURE_MOTOR_STEP_PIN = 5;  // Pressure valve control motor step pin
+const unsigned char PUMP_IN_PIN1 = 8;  // H-bridge input 1
+const unsigned char PUMP_IN_PIN2 = 7;  // H-bridge input 2
+const unsigned char PUMP_ENA_PIN = 9;  // H-bridge enable/PWM pin
 const unsigned char PRESSURE_SENSOR_PIN1 = A1;    // First pressure sensor input pin
 const unsigned char PRESSURE_SENSOR_PIN2 = A2;    // Second pressure sensor input pin
 const unsigned char PRESSURE_SENSOR_PIN3 = A3;    // Third pressure sensor input pin
@@ -21,6 +24,7 @@ const unsigned char PRESSURE_SENSOR_PIN3 = A3;    // Third pressure sensor input
 // Other constants
 const unsigned long PRESSURE_SENSOR_READ_INTERVAL = 50.;  // Interval for pressure readings (ms)
 const unsigned long FLOW_SENSOR_READ_INTERVAL = 2000.;    // Interval for flow readings (ms); assumed to be many times larger than PRESSURE_SENSOR_READ_INTERVAL
+const unsigned long PRESSURE_MOTOR_SPEED_NORMAL = 3500;  // delay for motor when operating at normal speed
 
 const float DEG_PER_STEP = 1.8;  // For pressure valve control motor
 const int STEPS_PER_REV = 200;   // assuming # of microsteps is 1
@@ -41,7 +45,7 @@ char newFlowIndicator = 'N';  // Indicates whether a new flow reading is availab
 
 int pressureMotorStepNumber = 0;  // For controlling the pressure valve motor
 int pressureMotorDelayMicroseconds;  // time off for pressure motor per stepper motor pulse;  3500 (normal) / 25000 (resetting)
-int flowVoltage = 0;              // For controlling the pump
+int pumpAnalogWrite = 0;              // For controlling the pump
 
 /**
  * Interrupt service routines for the flow sensors.
@@ -82,7 +86,7 @@ void setup() {
   // pressureMotorDelayMicroseconds = 10000;     // slow down while resetting so motor isn't damaged when valve locks 
   // rotateMotorByStep(-MAX_STEPS);              // reset valve position to 100% closed
   // rotateMotorByStep(round(MAX_STEPS * 0.7));  // Move to 30% closed (tough to spin valve at values lower than this)
-  // pressureMotorDelayMicroseconds = 3500;      // speed up for normal use
+  pressureMotorDelayMicroseconds = 10000;      // speed up for normal use
 }
 
 /**
@@ -172,7 +176,7 @@ void rotateMotorByAngle(float degrees) {
 
 /*
  * Processes incoming serial commands to control relevant outputs. Currently supports just the motor for the pressure valve. 
- * Assumes Example string: "Pressure Motor Step Number: 50, Flow Motor Voltage: 50"
+ * Assumes Example string: "Pressure Motor Step Number: (0-1400), Flow Motor Voltage: (0-255)"
 */
 void processSerial() {
   String command = Serial.readStringUntil("\n");
@@ -186,8 +190,9 @@ void processSerial() {
 
     // Parse each line
     int stepNumber;
-    if (sscanf(line.c_str(), "Pressure Motor Step Number: %d, Flow Motor Voltage: %d", &stepNumber, &flowVoltage) == 2) {
+    if (sscanf(line.c_str(), "Pressure Motor Step Number: %d, Pump Duty Cycle: %d", &stepNumber, &pumpAnalogWrite) == 2) {
       rotateMotorToStep(stepNumber);
+      analogWrite(PUMP_ENA_PIN,pumpAnalogWrite);
     }
 
     // Remove this line (and the newline character) from 'command'
