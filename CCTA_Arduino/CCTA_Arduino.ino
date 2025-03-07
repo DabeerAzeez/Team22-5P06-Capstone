@@ -10,8 +10,8 @@
 // TODO: Rename the flow/pressure sensor pins based on the specific locations (e.g. IVC/SVC)? Depends on how we implement modularity
 
 // Pin definitions
-const unsigned char FLOW_SENSOR_PIN1 = 1;         // First flow sensor input pin
-const unsigned char FLOW_SENSOR_PIN2 = 2;         // Second flow sensor input pin
+const unsigned char FLOW_SENSOR_PIN1 = 2;         // First flow sensor input pin
+const unsigned char FLOW_SENSOR_PIN2 = 3;         // Second flow sensor input pin
 const unsigned char PRESSURE_MOTOR_DIR_PIN = 4;   // Pressure valve control motor direction pin
 const unsigned char PRESSURE_MOTOR_STEP_PIN = 5;  // Pressure valve control motor step pin
 const unsigned char PUMP_IN_PIN1 = 8;  // H-bridge input 1
@@ -115,8 +115,8 @@ void loop() {
   // Read flow sensor values and update new flow indicator
   if (currentTime >= (flowSensorTime + FLOW_SENSOR_READ_INTERVAL)) {
     flowSensorTime = currentTime;
-    flowRate1 = readFlowSensor(flow_frequency1);
-    flowRate2 = readFlowSensor(flow_frequency2);
+    flowRate1 = readFlowSensor(flow_frequency1, 1);
+    flowRate2 = readFlowSensor(flow_frequency2, 2);
     newFlowIndicator = 'Y';
   } else {
     newFlowIndicator = 'N';
@@ -208,9 +208,15 @@ void processSerial() {
  * @param flow_frequency - The pulse count of the flow sensor.
  * @return The calculated flow rate in L/min.
  */
-float readFlowSensor(volatile int &flow_frequency) {
+float readFlowSensor(volatile int &flow_frequency, int sensorNum) {
   float flowRate = (flow_frequency / 9.68) * (1000.0 / FLOW_SENSOR_READ_INTERVAL);
   flow_frequency = 0;
+
+  if (sensorNum == 1) {
+    flowRate = flowRate * 0.8133 + 0.6081;
+  } else if (sensorNum == 2) {
+    flowRate = flowRate * 0.7923 + 0.785;  
+  }
   return flowRate;
 }
 
@@ -233,24 +239,25 @@ float interpolatePressure(float adc_value, int sensor) {
   const float *pressure_mmHg;
   int size = 0;
 
-  static const float voltage_V1[11] = { 74, 250, 344, 479, 591, 704, 777, 871, 961, 969, 971 };
-  static const float pressure_mmHg1[11] = { 0.7, 21.7, 33.0, 49.5, 63.0, 76.5, 85.5, 96.7, 111.0, 138.7, 149.2 };
+  static const float voltage_V1[12] = { 54, 145, 214, 315, 404, 515, 620, 709, 852, 887, 935, 938 };
+  static const float pressure_mmHg1[12] = { 0.7, 12, 20.2, 33.0, 44.2, 57.7, 70.5, 81.7, 94.5, 104.2, 115.5, 130.5 };
 
-  static const float voltage_V2[8] = { 117, 175, 363, 576, 700, 856, 960, 967 };
-  static const float pressure_mmHg2[8] = { 2.2, 24.0, 48.7, 75.0, 91.5, 111.0, 128.2, 151.5 };
+  static const float voltage_V2[14] = { 16, 98, 193, 258, 340, 423, 495, 596, 690, 763, 846, 915, 937, 939};
+  static const float pressure_mmHg2[14] = { 0, 10.5, 21.7, 29.2, 39.7, 49.5, 58.5, 70.5, 82.5, 90.7, 102, 111, 123.7, 135 };
 
   // Copied from sensor 2, should recalibrate it
   static const float voltage_V3[8] = { 117, 175, 363, 576, 700, 856, 960, 967 };
   static const float pressure_mmHg3[8] = { 2.2, 24.0, 48.7, 75.0, 91.5, 111.0, 128.2, 151.5 };
 
+  // Select calibration curve
   if (sensor == 1) {
     voltage_V = voltage_V1;
     pressure_mmHg = pressure_mmHg1;
-    size = 11;
+    size = 12;  // TODO: automatically determine size
   } else if (sensor == 2) {
     voltage_V = voltage_V2;
     pressure_mmHg = pressure_mmHg2;
-    size = 8;
+    size = 14;
   } else {
     voltage_V = voltage_V3;
     pressure_mmHg = pressure_mmHg3;
