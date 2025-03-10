@@ -14,9 +14,7 @@ const unsigned char FLOW_SENSOR_PIN1 = 2;         // First flow sensor input pin
 const unsigned char FLOW_SENSOR_PIN2 = 3;         // Second flow sensor input pin
 const unsigned char PRESSURE_MOTOR_DIR_PIN = 4;   // Pressure valve control motor direction pin
 const unsigned char PRESSURE_MOTOR_STEP_PIN = 5;  // Pressure valve control motor step pin
-const unsigned char PUMP_IN_PIN1 = 8;  // H-bridge input 1
-const unsigned char PUMP_IN_PIN2 = 7;  // H-bridge input 2
-const unsigned char PUMP_ENA_PIN = 9;  // H-bridge enable/PWM pin
+const unsigned char PUMP_PWM_PIN = 9;  // H-bridge enable/PWM pin
 const unsigned char PRESSURE_SENSOR_PIN1 = A1;    // First pressure sensor input pin
 const unsigned char PRESSURE_SENSOR_PIN2 = A2;    // Second pressure sensor input pin
 const unsigned char PRESSURE_SENSOR_PIN3 = A3;    // Third pressure sensor input pin
@@ -87,6 +85,8 @@ void setup() {
   // rotateMotorByStep(-MAX_STEPS);              // reset valve position to 100% closed
   // rotateMotorByStep(round(MAX_STEPS * 0.7));  // Move to 30% closed (tough to spin valve at values lower than this)
   pressureMotorDelayMicroseconds = 10000;      // speed up for normal use
+
+  analogWrite(PUMP_PWM_PIN,255);
 }
 
 /**
@@ -99,6 +99,7 @@ void loop() {
   // Check serial comms for control messages
   if (Serial.available()) {
     processSerial();
+    delay(200);  // TODO: Investigate, seems to stabilize measured flow sensor values for some reason
   }
 
   // Read pressure sensor values at defined intervals
@@ -124,7 +125,7 @@ void loop() {
 
   printSensorValues(newFlowIndicator, flow_frequency1, flowRate1, flow_frequency2, flowRate2,
                     pressureValueRaw1, pressureValue1, pressureValueRaw2, pressureValue2,
-                    pressureValueRaw3, pressureValue3);
+                    pressureValueRaw3, pressureValue3, pumpAnalogWrite);
 }
 
 /**
@@ -192,7 +193,7 @@ void processSerial() {
     int stepNumber;
     if (sscanf(line.c_str(), "Pressure Motor Step Number: %d, Pump Duty Cycle: %d", &stepNumber, &pumpAnalogWrite) == 2) {
       rotateMotorToStep(stepNumber);
-      analogWrite(PUMP_ENA_PIN,pumpAnalogWrite);
+      analogWrite(PUMP_PWM_PIN,pumpAnalogWrite);
     }
 
     // Remove this line (and the newline character) from 'command'
@@ -213,9 +214,17 @@ float readFlowSensor(volatile int &flow_frequency, int sensorNum) {
   flow_frequency = 0;
 
   if (sensorNum == 1) {
-    flowRate = flowRate * 0.8133 + 0.6081;
+    if (flowRate < 1) {
+      flowRate = flowRate * 1.4214;  // Adjusted slope for continuity close to flowRate = 0
+    } else {
+      flowRate = flowRate * 0.8133 + 0.6081;
+    }
   } else if (sensorNum == 2) {
-    flowRate = flowRate * 0.7923 + 0.785;  
+    if (flowRate < 1) {
+      flowRate = flowRate * 1.5773;  // Adjusted slope for continuity close to flowRate = 0
+    } else {
+      flowRate = flowRate * 0.7923 + 0.785;
+    }
   }
   return flowRate;
 }
@@ -293,10 +302,11 @@ float interpolatePressure(float adc_value, int sensor) {
  * @param pressureValue2 - Processed pressure from the second pressure sensor.
  * @param pressureValueRaw3 - Raw ADC value from the third pressure sensor.
  * @param pressureValue3 - Processed pressure from the third pressure sensor.
+ * @param pumpAnalogWrite - Duty cycle value sent to pump via PWM (0-255)
  */
 void printSensorValues(char newFlowIndicator, int flowValueRaw1, float flowValue1, int flowValueRaw2, float flowValue2,
                        int pressureValueRaw1, float pressureValue1, int pressureValueRaw2, float pressureValue2,
-                       int pressureValueRaw3, float pressureValue3) {
+                       int pressureValueRaw3, float pressureValue3, int pumpAnalogWrite) {
   Serial.print("New Flow?: ");
   Serial.print(newFlowIndicator);
   Serial.print(", Flow Raw 1: ");
@@ -323,5 +333,8 @@ void printSensorValues(char newFlowIndicator, int flowValueRaw1, float flowValue
   Serial.print(pressureValueRaw3);
   Serial.print(", Pressure 3: ");
   Serial.print(pressureValue3);
-  Serial.println(" mmHg");
+  Serial.print(" mmHg");
+  Serial.print(", Pump Analog Write: ");
+  Serial.print(pumpAnalogWrite); 
+  Serial.println("/255");
 }
