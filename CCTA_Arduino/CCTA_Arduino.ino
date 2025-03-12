@@ -9,12 +9,14 @@
 // TODO: Check that AREF is connected to something
 // TODO: Rename the flow/pressure sensor pins based on the specific locations (e.g. IVC/SVC)? Depends on how we implement modularity
 
+#define PI 3.14159265358979323846
+
 // Pin definitions
 const unsigned char FLOW_SENSOR_PIN1 = 2;         // First flow sensor input pin
 const unsigned char FLOW_SENSOR_PIN2 = 3;         // Second flow sensor input pin
 const unsigned char PRESSURE_MOTOR_DIR_PIN = 4;   // Pressure valve control motor direction pin
 const unsigned char PRESSURE_MOTOR_STEP_PIN = 5;  // Pressure valve control motor step pin
-const unsigned char PUMP_PWM_PIN = 9;  // H-bridge enable/PWM pin
+const unsigned char PUMP_PWM_PIN = 9;             // H-bridge enable/PWM pin
 const unsigned char PRESSURE_SENSOR_PIN1 = A1;    // First pressure sensor input pin
 const unsigned char PRESSURE_SENSOR_PIN2 = A2;    // Second pressure sensor input pin
 const unsigned char PRESSURE_SENSOR_PIN3 = A3;    // Third pressure sensor input pin
@@ -22,7 +24,8 @@ const unsigned char PRESSURE_SENSOR_PIN3 = A3;    // Third pressure sensor input
 // Other constants
 const unsigned long PRESSURE_SENSOR_READ_INTERVAL = 50.;  // Interval for pressure readings (ms)
 const unsigned long FLOW_SENSOR_READ_INTERVAL = 2000.;    // Interval for flow readings (ms); assumed to be many times larger than PRESSURE_SENSOR_READ_INTERVAL
-const unsigned long PRESSURE_MOTOR_SPEED_NORMAL = 3500;  // delay for motor when operating at normal speed
+const unsigned long PRESSURE_MOTOR_SPEED_NORMAL = 3500;   // delay for motor when operating at normal speed
+const unsigned long EXPECTED_MATLAB_MESSAGE_LENGTH = 50;  // Length of message (# chars) expected from MATLAB for pump control
 
 const float DEG_PER_STEP = 1.8;  // For pressure valve control motor
 const int STEPS_PER_REV = 200;   // assuming # of microsteps is 1
@@ -41,9 +44,9 @@ int pressureValueRaw1 = 0, pressureValueRaw2 = 0, pressureValueRaw3 = 0;
 float pressureValue1 = 0, pressureValue2 = 0, pressureValue3 = 0;
 char newFlowIndicator = 'N';  // Indicates whether a new flow reading is available
 
-int pressureMotorStepNumber = 0;  // For controlling the pressure valve motor
+int pressureMotorStepNumber = 0;     // For controlling the pressure valve motor
 int pressureMotorDelayMicroseconds;  // time off for pressure motor per stepper motor pulse;  3500 (normal) / 25000 (resetting)
-int pumpAnalogWrite = 0;              // For controlling the pump
+int pumpAnalogWrite = 128;           // For controlling the pump
 
 /**
  * Interrupt service routines for the flow sensors.
@@ -71,7 +74,7 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN2), flow2, RISING);
 
   // === SERIAL COMMUNICATION SETUP ===
-  Serial.begin(9600);
+  Serial.begin(115200);
 
   // === MISCELLANEOUS SETUP ===
   analogReference(EXTERNAL);
@@ -81,12 +84,12 @@ void setup() {
   flowSensorTime = currentTime;
   pressureSensorTime = currentTime;
 
-  // pressureMotorDelayMicroseconds = 10000;     // slow down while resetting so motor isn't damaged when valve locks 
+  // pressureMotorDelayMicroseconds = 10000;     // slow down while resetting so motor isn't damaged when valve locks
   // rotateMotorByStep(-MAX_STEPS);              // reset valve position to 100% closed
   // rotateMotorByStep(round(MAX_STEPS * 0.7));  // Move to 30% closed (tough to spin valve at values lower than this)
-  pressureMotorDelayMicroseconds = 10000;      // speed up for normal use
+  pressureMotorDelayMicroseconds = 10000;  // speed up for normal use
 
-  analogWrite(PUMP_PWM_PIN,255);
+  analogWrite(PUMP_PWM_PIN, pumpAnalogWrite);
 }
 
 /**
@@ -97,35 +100,66 @@ void loop() {
   currentTime = millis();
 
   // Check serial comms for control messages
-  if (Serial.available()) {
+  if (Serial.available() > EXPECTED_MATLAB_MESSAGE_LENGTH) {
     processSerial();
-    delay(200);  // TODO: Investigate, seems to stabilize measured flow sensor values for some reason
   }
 
   // Read pressure sensor values at defined intervals
-  if (currentTime >= (pressureSensorTime + PRESSURE_SENSOR_READ_INTERVAL)) {
-    pressureSensorTime = currentTime;
-    pressureValueRaw1 = readPressureSensor(PRESSURE_SENSOR_PIN1);
-    pressureValue1 = interpolatePressure(pressureValueRaw1, 1);
-    pressureValueRaw2 = readPressureSensor(PRESSURE_SENSOR_PIN2);
-    pressureValue2 = interpolatePressure(pressureValueRaw2, 2);
-    pressureValueRaw3 = readPressureSensor(PRESSURE_SENSOR_PIN3);
-    pressureValue3 = interpolatePressure(pressureValueRaw3, 3);
-  }
+  // if (currentTime >= (pressureSensorTime + PRESSURE_SENSOR_READ_INTERVAL)) {
+  //   pressureSensorTime = currentTime;
+  //   pressureValueRaw1 = readPressureSensor(PRESSURE_SENSOR_PIN1);
+  //   pressureValue1 = interpolatePressure(pressureValueRaw1, 1);
+  //   pressureValueRaw2 = readPressureSensor(PRESSURE_SENSOR_PIN2);
+  //   pressureValue2 = interpolatePressure(pressureValueRaw2, 2);
+  //   pressureValueRaw3 = readPressureSensor(PRESSURE_SENSOR_PIN3);
+  //   pressureValue3 = interpolatePressure(pressureValueRaw3, 3);
+  // }
 
-  // Read flow sensor values and update new flow indicator
-  if (currentTime >= (flowSensorTime + FLOW_SENSOR_READ_INTERVAL)) {
-    flowSensorTime = currentTime;
-    flowRate1 = readFlowSensor(flow_frequency1, 1);
-    flowRate2 = readFlowSensor(flow_frequency2, 2);
-    newFlowIndicator = 'Y';
-  } else {
-    newFlowIndicator = 'N';
-  }
+  // // Read flow sensor values and update new flow indicator
+  // if (currentTime >= (flowSensorTime + FLOW_SENSOR_READ_INTERVAL)) {
+  //   flowSensorTime = currentTime;
+  //   flowRate1 = readFlowSensor(flow_frequency1, 1);
+  //   flowRate2 = readFlowSensor(flow_frequency2, 2);
+  //   newFlowIndicator = 'Y';
+  // } else {
+  //   newFlowIndicator = 'N';
+  // }
 
-  printSensorValues(newFlowIndicator, flow_frequency1, flowRate1, flow_frequency2, flowRate2,
+  simulateDataValues(true);
+
+  printSensorValues(newFlowIndicator, flowRate1, flowRate2,
                     pressureValueRaw1, pressureValue1, pressureValueRaw2, pressureValue2,
                     pressureValueRaw3, pressureValue3, pumpAnalogWrite);
+}
+
+// Function to simulate data values with sinusoidal variations
+void simulateDataValues(bool oscillate) {
+  unsigned long currentTime = millis();
+
+  // Convert time to radians for a 2-second period
+  float timeInSeconds = (currentTime % 2000) / 1000.0;  // Loops every 2 seconds
+  float angle = timeInSeconds * PI;                     // Convert to radians
+
+  // Sinusoidal variation
+  float sinValue;
+  if (oscillate) {
+    sinValue = sin(angle);  // Ranges from -1 to 1
+  } else {
+    sinValue = 0;
+  }
+
+  // Assign values with oscillations
+  flowRate1 = 3.0 + sinValue * 0.5;  // Oscillates between 2.5 and 3.5
+  flowRate2 = 4.0 + sinValue * 0.5;  // Oscillates between 3.5 and 4.5
+
+  pressureValueRaw1 = 255 + sinValue * 50;  // Oscillates around 255
+  pressureValue1 = 20 + sinValue * 10;      // Oscillates between 10 and 30
+
+  pressureValueRaw2 = 255 + sinValue * 50;
+  pressureValue2 = 40 + sinValue * 10;  // Oscillates between 30 and 50
+
+  pressureValueRaw3 = 255 + sinValue * 50;
+  pressureValue3 = 60 + sinValue * 10;  // Oscillates between 50 and 70
 }
 
 /**
@@ -150,7 +184,7 @@ void rotateMotorByStep(int steps) {
     digitalWrite(PRESSURE_MOTOR_STEP_PIN, HIGH);
     delayMicroseconds(350);
     digitalWrite(PRESSURE_MOTOR_STEP_PIN, LOW);
-    delayMicroseconds(pressureMotorDelayMicroseconds); 
+    delayMicroseconds(pressureMotorDelayMicroseconds);
   }
   pressureMotorStepNumber += steps;
 }
@@ -193,7 +227,7 @@ void processSerial() {
     int stepNumber;
     if (sscanf(line.c_str(), "Pressure Motor Step Number: %d, Pump Duty Cycle: %d", &stepNumber, &pumpAnalogWrite) == 2) {
       rotateMotorToStep(stepNumber);
-      analogWrite(PUMP_PWM_PIN,pumpAnalogWrite);
+      analogWrite(PUMP_PWM_PIN, pumpAnalogWrite);
     }
 
     // Remove this line (and the newline character) from 'command'
@@ -251,7 +285,7 @@ float interpolatePressure(float adc_value, int sensor) {
   static const float voltage_V1[12] = { 54, 145, 214, 315, 404, 515, 620, 709, 852, 887, 935, 938 };
   static const float pressure_mmHg1[12] = { 0.7, 12, 20.2, 33.0, 44.2, 57.7, 70.5, 81.7, 94.5, 104.2, 115.5, 130.5 };
 
-  static const float voltage_V2[14] = { 16, 98, 193, 258, 340, 423, 495, 596, 690, 763, 846, 915, 937, 939};
+  static const float voltage_V2[14] = { 16, 98, 193, 258, 340, 423, 495, 596, 690, 763, 846, 915, 937, 939 };
   static const float pressure_mmHg2[14] = { 0, 10.5, 21.7, 29.2, 39.7, 49.5, 58.5, 70.5, 82.5, 90.7, 102, 111, 123.7, 135 };
 
   // Copied from sensor 2, should recalibrate it
@@ -292,9 +326,7 @@ float interpolatePressure(float adc_value, int sensor) {
 /**
  * Sends flow and pressure sensor values over serial communication.
  * @param newFlowIndicator - 'Y' if new flow data is available, 'N' otherwise.
- * @param flowValueRaw1 - Raw pulse count from the first flow sensor.
  * @param flowValue1 - Processed flow rate from the first flow sensor.
- * @param flowValueRaw2 - Raw pulse count from the second flow sensor.
  * @param flowValue2 - Processed flow rate from the second flow sensor.
  * @param pressureValueRaw1 - Raw ADC value from the first pressure sensor.
  * @param pressureValue1 - Processed pressure from the first pressure sensor.
@@ -304,37 +336,38 @@ float interpolatePressure(float adc_value, int sensor) {
  * @param pressureValue3 - Processed pressure from the third pressure sensor.
  * @param pumpAnalogWrite - Duty cycle value sent to pump via PWM (0-255)
  */
-void printSensorValues(char newFlowIndicator, int flowValueRaw1, float flowValue1, int flowValueRaw2, float flowValue2,
+void printSensorValues(char newFlowIndicator, float flowValue1, float flowValue2,
                        int pressureValueRaw1, float pressureValue1, int pressureValueRaw2, float pressureValue2,
                        int pressureValueRaw3, float pressureValue3, int pumpAnalogWrite) {
-  Serial.print("New Flow?: ");
+
+  Serial.print("NF: ");
   Serial.print(newFlowIndicator);
-  Serial.print(", Flow Raw 1: ");
-  Serial.print(flowValueRaw1);
-  Serial.print(", Flow 1: ");
+  Serial.print(", F1: ");
   Serial.print(flowValue1);
   Serial.print(" L/min");
-  Serial.print(", Flow Raw 2: ");
-  Serial.print(flowValueRaw2);
-  Serial.print(", Flow 2: ");
+  Serial.print(", F2: ");
   Serial.print(flowValue2);
   Serial.print(" L/min");
-  Serial.print(", Pressure Raw 1: ");
+
+  Serial.print(", P1R: ");
   Serial.print(pressureValueRaw1);
-  Serial.print(", Pressure 1: ");
+  Serial.print(", P1: ");
   Serial.print(pressureValue1);
   Serial.print(" mmHg");
-  Serial.print(", Pressure Raw 2: ");
+
+  Serial.print(", P2R: ");
   Serial.print(pressureValueRaw2);
-  Serial.print(", Pressure 2: ");
+  Serial.print(", P2: ");
   Serial.print(pressureValue2);
   Serial.print(" mmHg");
-  Serial.print(", Pressure Raw 3: ");
+
+  Serial.print(", P3R: ");
   Serial.print(pressureValueRaw3);
-  Serial.print(", Pressure 3: ");
+  Serial.print(", P3: ");
   Serial.print(pressureValue3);
   Serial.print(" mmHg");
-  Serial.print(", Pump Analog Write: ");
-  Serial.print(pumpAnalogWrite); 
+
+  Serial.print(", Pump: ");
+  Serial.print(pumpAnalogWrite);
   Serial.println("/255");
 }

@@ -83,6 +83,7 @@ classdef CCTA_exported < matlab.apps.AppBase
         plot_raw_data = true;
         F_REFRESH = 20;  % App refresh rate (Hz)
         ARDUINO_ANALOGWRITE_MAX = 255;
+        ARDUINO_SERIAL_BITRATE = 115200;
 
         arduinoObj;
         tempLogFile = fullfile(pwd, 'console_output_temp.txt');  % Define a persistent temporary log file that always stores session history
@@ -106,13 +107,14 @@ classdef CCTA_exported < matlab.apps.AppBase
         Ki_flow = 0;
         Kd_flow = 0;
 
-        Kp_pressure = 5;  % PID coefficients when controlling pressure
+        Kp_pressure = 2;  % PID coefficients when controlling pressure
         Ki_pressure = 0;
         Kd_pressure = 0;
         
         pressureMotorPosition = 0;
         MAX_PRESSURE_MOTOR_POSITION = -200*7;  % 7 rotations, 200 steps per rotation; TODO: read in max stepper value from Arduino instead of hard-coding to 7 rotations
 
+        lastFlowDutyCycle = 128;  % for comparisons
         flowDutyCycle = 128;  % Initialize halfway
         PumpControlMode = 'Manual';
 
@@ -144,10 +146,10 @@ classdef CCTA_exported < matlab.apps.AppBase
 
     methods (Access = private)
 
-        function [t, newFlowIndicator, flow_value_raw1, flow_value1, ...
-                flow_value_raw2, flow_value2, pressure_value_raw1, ...
+        function [t, newFlowIndicator, flow_value1, ...
+                flow_value2, pressure_value_raw1, ...
                 pressure_value1, pressure_value_raw2, pressure_value2, ...
-                pressure_value_raw3, pressure_value3] = readSensorData(app)
+                pressure_value_raw3, pressure_value3] = parseArduinoData(app, line)
 
             % Reads and parses serial data from the Arduino serial port.
             % Inputs:
@@ -158,22 +160,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             %   pressure_value_raw - Raw ADC value for pressure sensor.
             %   pressure_value - Processed pressure in mmHg.
 
-            if app.SimulateDataCheckBox.Value
-                % Simulate data (for testing)
-                line = "New Flow?: N, Flow Raw 1: 0, Flow 1: 1.50 L/min, Flow Raw 2: 0, Flow 2: 2.50 L/min, Pressure Raw 1: 1023, Pressure 1: 20 mmHg, Pressure Raw 2: 1023, Pressure 2: 50 mmHg, Pressure Raw 3: 1023, Pressure 3: 80 mmHg\n";
-            else
-                % Read data from Arduino; flush serial buffer by reading
-                % three times to improve results
-                %
-                % TODO: See if waiting for arduinoObj.NumBytesAvailable > 0
-                % replaces the need for this for loop
-                for j = 1:3
-                    line = readline(app.arduinoObj);
-                end
-            end
-
             t = toc;
-            pause(app.dt_refresh);  % pause to allow app to process other user inputs (e.g. button presses)
 
             if isempty(line)
                 disp("No serial data received...")
@@ -192,51 +179,44 @@ classdef CCTA_exported < matlab.apps.AppBase
 
             % Attempt to parse the serial data
             try
-                % Expected format:
-                % "New Flow?: Y, Flow Raw 1: 120, Flow 1: 3.50 L/min, Flow Raw 2: 110, Flow 2: 3.20 L/min,
-                % Pressure Raw 1: 512, Pressure 1: 75.3 mmHg, Pressure Raw 2: 523, Pressure 2: 76.1 mmHg,
-                % Pressure Raw 3: 540, Pressure 3: 78.4 mmHg"
-
-                % Extract values using sscanf
+                % Ensure we received all expected values
                 data = sscanf(line, ...
-                    ['New Flow?: %c, Flow Raw 1: %d, Flow 1: %f L/min, ' ...
-                    'Flow Raw 2: %d, Flow 2: %f L/min, ' ...
-                    'Pressure Raw 1: %d, Pressure 1: %f mmHg, ' ...
-                    'Pressure Raw 2: %d, Pressure 2: %f mmHg, ' ...
-                    'Pressure Raw 3: %d, Pressure 3: %f mmHg, ' ...
-                    'Pump Analog Write: %d/255\n']);
+                    ['NF: %c, F1: %f L/min, F2: %f L/min, ' ...
+                    'P1R: %d, P1: %f mmHg, ' ...
+                    'P2R: %d, P2: %f mmHg, ' ...
+                    'P3R: %d, P3: %f mmHg, ' ...
+                    'Pump: %d/255\n']);
 
                 % Ensure we received all expected values
-                if numel(data) == 11
-                    newFlowIndicator = char(data(1));   % 'Y' or 'N'
-                    flow_value_raw1 = data(2);
-                    flow_value1 = data(3);
-                    flow_value_raw2 = data(4);
-                    flow_value2 = data(5);
-                    pressure_value_raw1 = data(6);
-                    pressure_value1 = data(7);
-                    pressure_value_raw2 = data(8);
-                    pressure_value2 = data(9);
-                    pressure_value_raw3 = data(10);
-                    pressure_value3 = data(11);
+                if numel(data) == 10
+                    newFlowIndicator = char(data(1));  % 'Y' or 'N'
+                    flow_value1 = data(2);
+                    flow_value2 = data(3);
+                    pressure_value_raw1 = data(4);
+                    pressure_value1 = data(5);
+                    pressure_value_raw2 = data(6);
+                    pressure_value2 = data(7);
+                    pressure_value_raw3 = data(8);
+                    pressure_value3 = data(9);
+                    pump_analog_write = data(10);
 
                     % Get timestamp
                     timestamp = datetime("now");
 
                     % Format the new sensor data as a string
                     newLogEntry = sprintf(['===== Sensor Data (%s) =====\n', ...
-                        'New Flow?: %c\n', ...
-                        'Flow Raw 1: %d, Flow 1: %.2f L/min\n', ...
-                        'Flow Raw 2: %d, Flow 2: %.2f L/min\n', ...
-                        'Pressure Raw 1: %d, Pressure 1: %.2f mmHg\n', ...
-                        'Pressure Raw 2: %d, Pressure 2: %.2f mmHg\n', ...
-                        'Pressure Raw 3: %d, Pressure 3: %.2f mmHg\n\n'], ...
+                        'NF: %c\n', ...
+                        'F1: %.2f L/min, F2: %.2f L/min\n', ...
+                        'P1R: %d, P1: %.2f mmHg\n', ...
+                        'P2R: %d, P2: %.2f mmHg\n', ...
+                        'P3R: %d, P3: %.2f mmHg\n', ...
+                        'Pump: %d/255\n'], ...
                         timestamp, newFlowIndicator, ...
-                        flow_value_raw1, flow_value1, ...
-                        flow_value_raw2, flow_value2, ...
+                        flow_value1, flow_value2, ...
                         pressure_value_raw1, pressure_value1, ...
                         pressure_value_raw2, pressure_value2, ...
-                        pressure_value_raw3, pressure_value3);
+                        pressure_value_raw3, pressure_value3, ...
+                        pump_analog_write);
 
                     % Print to console
                     fprintf('%s', newLogEntry);
@@ -295,10 +275,25 @@ classdef CCTA_exported < matlab.apps.AppBase
         
         function runMainLoop(app)
             while (1)
+                line = app.getArduinoData();
+
                 % Read sensor data
-                [tNew, ~, ~, flow_value1, ~, flow_value2, ...
+                [tNew, ~, flow_value1, flow_value2, ...
                     ~, pressure_value1, ~, pressure_value2, ...
-                    ~, pressure_value3] = app.readSensorData();
+                    ~, pressure_value3] = app.parseArduinoData(line);
+
+                % Generate artificial values
+                % tNew = 1;
+                % flow_value_raw1 = -999;
+                % flow_value1 = -999;
+                % flow_value_raw2 = -999;
+                % flow_value2 = -999;
+                % pressure_value_raw1 = -999;
+                % pressure_value1 = -999;
+                % pressure_value_raw2 = -999;
+                % pressure_value2 = -999;
+                % pressure_value_raw3 = -999;
+                % pressure_value3 = -999;
 
                 % Append new sensor data
                 app.t = [app.t tNew];
@@ -324,13 +319,13 @@ classdef CCTA_exported < matlab.apps.AppBase
                     cla(app.PressureAxes); % Clear previous plots
 
                     if app.Pressure1_GraphEnable.Value
-                        plot(app.PressureAxes, app.t, app.pressure_vals1, 'r', 'DisplayName', app.pressure1_label);
+                        plot(app.PressureAxes, app.t, app.pressure_vals1, 'r', 'DisplayName', app.pressure1_label, 'LineWidth', 1.5);
                     end
                     if app.Pressure2_GraphEnable.Value
-                        plot(app.PressureAxes, app.t, app.pressure_vals2, 'g', 'DisplayName', app.pressure2_label);
+                        plot(app.PressureAxes, app.t, app.pressure_vals2, 'g', 'DisplayName', app.pressure2_label, 'LineWidth', 1.5);
                     end
                     if app.Pressure3_GraphEnable.Value
-                        plot(app.PressureAxes, app.t, app.pressure_vals3, 'b', 'DisplayName', app.pressure3_label);
+                        plot(app.PressureAxes, app.t, app.pressure_vals3, 'b', 'DisplayName', app.pressure3_label, 'LineWidth', 1.5);
                     end
 
                     hold(app.PressureAxes, 'off');
@@ -345,10 +340,10 @@ classdef CCTA_exported < matlab.apps.AppBase
                     cla(app.FlowAxes); % Clear previous plots
 
                     if app.Flow1_GraphEnable.Value
-                        plot(app.FlowAxes, app.t, app.flow_vals1, 'r', 'DisplayName', app.flow1_label);
+                        plot(app.FlowAxes, app.t, app.flow_vals1, 'r', 'DisplayName', app.flow1_label, 'LineWidth', 2);
                     end
                     if app.Flow2_GraphEnable.Value
-                        plot(app.FlowAxes, app.t, app.flow_vals2, 'g', 'DisplayName', app.flow2_label);
+                        plot(app.FlowAxes, app.t, app.flow_vals2, 'g', 'DisplayName', app.flow2_label, 'LineWidth', 2);
                     end
 
                     hold(app.FlowAxes, 'off');
@@ -359,8 +354,13 @@ classdef CCTA_exported < matlab.apps.AppBase
                     legend(app.FlowAxes, 'show','Location','northwest');
                 end
 
-                % Update PID Outputs (WIP)
-                app.updatePIDOutputs(flow_value1);  
+                % writeline(app.arduinoObj, sprintf("Pressure Motor Step Number: %d, Pump Duty Cycle: %d",100,randi([0,255])));
+                % app.WaitForArduinoMessage();
+
+                % Update PID Outputs
+                if app.PumpControlMode == "PID"
+                    app.updatePIDOutputs();
+                end
 
                 % Check whether disconnect button has been clicked
                 if app.ConnectButton.Text == "CONNECT"
@@ -368,15 +368,15 @@ classdef CCTA_exported < matlab.apps.AppBase
                 end
 
                 % Pause to prevent crashes
-                pause(app.dt_refresh);
+                % pause(app.dt_refresh);
             end
         end
 
         function setControlMode(app,mode)
-            if lower(mode) == "Manual"
+            if lower(mode) == "manual"
                 app.PumpControlMode = "Manual";
                 app.ControlSwitch.Value = "Manual";
-            elseif lower(mode) == "PID"
+            elseif lower(mode) == "pid"
                 app.PumpControlMode = "PID";
                 app.ControlSwitch.Value = "PID";
             else
@@ -387,10 +387,17 @@ classdef CCTA_exported < matlab.apps.AppBase
         function sendControlValuesToArduino(app)
             app.MotorStepNumberEditField.Value = app.pressureMotorPosition;
 
-            if lower(app.PumpControlMode) == "PID"
+            if lower(app.PumpControlMode) == "pid"
                 % Update control values based on PID algorithm
                 app.flowDutyCycle = app.flowDutyCycle + round(app.PID_output);
-            elseif lower(app.PumpControlMode) == "Manual"
+
+                % Place PID output within limits
+                if app.flowDutyCycle > app.ARDUINO_ANALOGWRITE_MAX
+                    app.flowDutyCycle = app.ARDUINO_ANALOGWRITE_MAX;
+                elseif app.flowDutyCycle < 0
+                    app.flowDutyCycle = 0;
+                end
+            elseif lower(app.PumpControlMode) == "manual"
                 % do nothing
             else
                 error("Invalid pump control mode selected.")
@@ -401,8 +408,18 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.PumpPowerSlider.Value = app.flowDutyCycle / app.ARDUINO_ANALOGWRITE_MAX * app.PumpPowerSlider.Limits(2);
 
             % Send command to Arduino
-            line = sprintf("Pressure Motor Step Number: %d, Pump Duty Cycle: %d",app.pressureMotorPosition,app.flowDutyCycle);
-            app.arduinoObj.writeline(line)
+            % command = sprintf("Pressure Motor Step Number: %d, Pump Duty Cycle: %d",app.pressureMotorPosition,app.flowDutyCycle);
+            % writeline(app.arduinoObj,command);
+            % app.WaitForArduinoMessage();
+
+            f = parfeval(@testAsync, 0);
+        end
+
+        function testAsync(app)
+            % Send command to Arduino
+            command = sprintf("Pressure Motor Step Number: %d, Pump Duty Cycle: %d",app.pressureMotorPosition,app.flowDutyCycle);
+            writeline(app.arduinoObj,command);
+            app.WaitForArduinoMessage();
         end
 
         function setPIDCoefficients(app,inputVariable)
@@ -422,13 +439,29 @@ classdef CCTA_exported < matlab.apps.AppBase
             end
         end
         
-        function updatePIDOutputs(app, newValue)
+        function updatePIDOutputs(app)
+            % Choose appropriate PID value based on setpoint ID
+            newValues = struct(...
+            'Pressure1', app.pressure_vals1(end), ...
+            'Pressure2', app.pressure_vals2(end), ...
+            'Pressure3', app.pressure_vals3(end), ...
+            'Flow1', app.flow_vals1(end), ...
+            'Flow2', app.flow_vals2(end) ...
+            );
+
+            % Ensure PID_setpoint_id is a valid field name
+            if isfield(newValues, app.PID_setpoint_id)
+                newValue = newValues.(app.PID_setpoint_id); % Use dynamic field referencing
+            else
+                error('Invalid field name: %s', app.PID_setpoint_id);
+            end
+
             % Calculate PID output
-            error = app.PID_setpoint - newValue;
-            app.PID_integral = app.PID_integral + error * app.DT_PID;
-            app.PID_derivative = (error - app.PID_prev_error) / app.DT_PID;
-            app.PID_output = app.Kp * error + app.Ki * app.PID_integral + app.Kd * app.PID_derivative;
-            app.PID_prev_error = error;
+            PID_error = app.PID_setpoint - newValue;
+            app.PID_integral = app.PID_integral + PID_error * app.DT_PID;
+            app.PID_derivative = (PID_error - app.PID_prev_error) / app.DT_PID;
+            app.PID_output = app.Kp * PID_error + app.Ki * app.PID_integral + app.Kd * app.PID_derivative;
+            app.PID_prev_error = PID_error;
 
             % fprintf("Setpoint / New Value / Error / Output / DC: %.2f, %.2f, %.2f, %.2f \n",app.PID_setpoint, newValue, error, app.PID_output, app.flowDutyCycle);
 
@@ -502,6 +535,38 @@ classdef CCTA_exported < matlab.apps.AppBase
             end
         end
 
+        
+        function setUpArduinoConnection(app)
+            app.arduinoObj = serialport(app.COMPortDropDown.Value, app.ARDUINO_SERIAL_BITRATE);
+            configureTerminator(app.arduinoObj, "LF"); % Assuming newline ('\n') terminates messages
+            app.arduinoObj.Timeout = 5; % Timeout for read operations 
+
+            while app.arduinoObj.NumBytesAvailable == 0
+                pause(0.1);  % wait for initial to come in
+            end
+        end
+        
+        function line = getArduinoData(app)
+            if app.SimulateDataCheckBox.Value
+                % Simulate data in GUI (for testing)
+                line = "New Flow?: N, Flow Raw 1: 0, Flow 1: 1.50 L/min, Flow Raw 2: 0, Flow 2: 2.50 L/min, Pressure Raw 1: 1023, Pressure 1: 20 mmHg, Pressure Raw 2: 1023, Pressure 2: 50 mmHg, Pressure Raw 3: 1023, Pressure 3: 80 mmHg\n";
+            else
+                if app.arduinoObj.NumBytesAvailable > 0
+                    flushinput(app.arduinoObj);
+                    readline(app.arduinoObj);  % Read until next newline in case flush clears part of a line
+                    line = readline(app.arduinoObj); % Read a line of text
+                else
+                    line = [];
+                end
+                pause(0.1); % Small delay to prevent CPU overuse
+            end
+        end
+        
+        function WaitForArduinoMessage(app)
+            while (app.arduinoObj.NumBytesAvailable == 0)
+                pause(0.0001);
+            end
+        end
     end
 
 
@@ -526,7 +591,7 @@ classdef CCTA_exported < matlab.apps.AppBase
                 app.ConnectedLamp.Color = "green";
 
                 if app.SimulateDataCheckBox.Value == false
-                    app.arduinoObj = serialport(app.COMPortDropDown.Value, 9600);
+                    app.setUpArduinoConnection();
                     app.setValveControlPanelEnabled(true);
                 else
                     app.setValveControlPanelEnabled(false);
@@ -619,6 +684,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.setControlMode("PID");
             app.setPIDCoefficients("Pressure");
             app.highlightSetPointUI("Pressure1");
+            app.PID_setpoint_id = "Pressure1";
         end
 
         % Value changed function: MotorStepNumberEditField
@@ -634,6 +700,8 @@ classdef CCTA_exported < matlab.apps.AppBase
         function ClosedSliderValueChanged(app, event)
             percent_closed = app.ClosedSlider.Value/app.ClosedSlider.Limits(2);  % negative because gear rotates valve the other way
             app.pressureMotorPosition = round(app.MAX_PRESSURE_MOTOR_POSITION * percent_closed);
+
+            flushoutput(app.arduinoObj);  % in case this was done in the middle of sending another command
             app.sendControlValuesToArduino();
         end
 
@@ -647,6 +715,8 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.flowDutyCycle = round(app.PumpPowerSlider.Value/app.PumpPowerSlider.Limits(2)*app.ARDUINO_ANALOGWRITE_MAX);
             app.AnalogWriteValueEditField.Value = app.flowDutyCycle;
             app.setControlMode("Manual");
+
+            flushoutput(app.arduinoObj);  % in case this was done in the middle of sending another command
             app.sendControlValuesToArduino();
         end
 
@@ -690,11 +760,13 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.setControlMode("PID");
             app.setPIDCoefficients("Flow");
             app.highlightSetPointUI("Flow1");
+            app.PID_setpoint_id = "Flow1";
         end
 
         % Value changed function: ControlSwitch
         function ControlSwitchValueChanged(app, event)
             app.setControlMode(app.ControlSwitch.Value);
+            app.highlightSetPointUI("None");
         end
 
         % Value changed function: Flow2_SetPoint
@@ -703,6 +775,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.setControlMode("PID");
             app.setPIDCoefficients("Flow");
             app.highlightSetPointUI("Flow2");
+            app.PID_setpoint_id = "Flow2";
         end
 
         % Value changed function: Pressure2_SetPoint
@@ -711,6 +784,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.setControlMode("PID");
             app.setPIDCoefficients("Pressure");
             app.highlightSetPointUI("Pressure2");
+            app.PID_setpoint_id = "Pressure2";
         end
 
         % Value changed function: Pressure3_SetPoint
@@ -719,6 +793,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.setControlMode("PID");
             app.setPIDCoefficients("Pressure");
             app.highlightSetPointUI("Pressure3");
+            app.PID_setpoint_id = "Pressure3";
         end
     end
 

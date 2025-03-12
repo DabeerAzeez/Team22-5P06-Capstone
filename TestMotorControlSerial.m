@@ -16,21 +16,22 @@ pause(3);
 % pick step number from 0 to 1400 (200 per rev. 7 revs max)
 
 % Send command to Arduino
-writeline(serialObj, "Pressure Motor Step Number: 200, Flow Motor Voltage: 50");
-pause(0.5);
-writeline(serialObj, "Pressure Motor Step Number: -200, Flow Motor Voltage: 50");
-pause(0.5);
-writeline(serialObj, "Pressure Motor Step Number: 400, Flow Motor Voltage: 50");
-pause(0.5);
+writeline(serialObj, sprintf("Pressure Motor Step Number: %d, Pump Duty Cycle: %d",100,64));
 
 % Continuous loop to read responses from Arduino
 disp("Waiting for response from Arduino... Press Ctrl+C to stop.");
 
+tic;
+
 while true
     if serialObj.NumBytesAvailable > 0  % Check if data is available
         data = readline(serialObj);  % Read incoming data
-        % data = read(serialObj, serialObj.NumBytesAvailable, "char"); % Read all available bytes
         disp("Arduino says: " + data);  % Display received message
     end
     pause(0.1);  % Small delay to avoid overloading CPU
+
+    if toc >= 5
+        writeline(serialObj, sprintf("Pressure Motor Step Number: %d, Pump Duty Cycle: %d",100,randi([0,255])));
+        tic;
+    end
 end
