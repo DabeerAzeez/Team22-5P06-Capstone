@@ -32,6 +32,9 @@ const int STEPS_PER_REV = 200;   // assuming # of microsteps is 1
 const int MAX_ROTATIONS = 7;     // of needle valve
 const int MAX_STEPS = STEPS_PER_REV * MAX_ROTATIONS;
 
+const bool SIMULATE_VALUES = true;        // whether simulated values should be sent over serial (for testing without setup)
+const bool SIMULATE_OSCILLATIONS = true;  // whether simulated values should oscillate sinusoidally over time
+
 // Variables
 volatile int flow_frequency1 = 0;  // First flow sensor pulse count
 volatile int flow_frequency2 = 0;  // Second flow sensor pulse count
@@ -106,28 +109,30 @@ void loop() {
     stringComplete = false;
   }
 
-  // Read pressure sensor values at defined intervals
-  // if (currentTime >= (pressureSensorTime + PRESSURE_SENSOR_READ_INTERVAL)) {
-  //   pressureSensorTime = currentTime;
-  //   pressureValueRaw1 = readPressureSensor(PRESSURE_SENSOR_PIN1);
-  //   pressureValue1 = interpolatePressure(pressureValueRaw1, 1);
-  //   pressureValueRaw2 = readPressureSensor(PRESSURE_SENSOR_PIN2);
-  //   pressureValue2 = interpolatePressure(pressureValueRaw2, 2);
-  //   pressureValueRaw3 = readPressureSensor(PRESSURE_SENSOR_PIN3);
-  //   pressureValue3 = interpolatePressure(pressureValueRaw3, 3);
-  // }
+  if (SIMULATE_VALUES) {
+    simulateDataValues(SIMULATE_OSCILLATIONS);
+  } else {
+    // Read pressure sensor values at defined intervals
+    if (currentTime >= (pressureSensorTime + PRESSURE_SENSOR_READ_INTERVAL)) {
+      pressureSensorTime = currentTime;
+      pressureValueRaw1 = readPressureSensor(PRESSURE_SENSOR_PIN1);
+      pressureValue1 = interpolatePressure(pressureValueRaw1, 1);
+      pressureValueRaw2 = readPressureSensor(PRESSURE_SENSOR_PIN2);
+      pressureValue2 = interpolatePressure(pressureValueRaw2, 2);
+      pressureValueRaw3 = readPressureSensor(PRESSURE_SENSOR_PIN3);
+      pressureValue3 = interpolatePressure(pressureValueRaw3, 3);
+    }
 
-  // // Read flow sensor values and update new flow indicator
-  // if (currentTime >= (flowSensorTime + FLOW_SENSOR_READ_INTERVAL)) {
-  //   flowSensorTime = currentTime;
-  //   flowRate1 = readFlowSensor(flow_frequency1, 1);
-  //   flowRate2 = readFlowSensor(flow_frequency2, 2);
-  //   newFlowIndicator = 'Y';
-  // } else {
-  //   newFlowIndicator = 'N';
-  // }
-
-  simulateDataValues(true);
+    // Read flow sensor values and update new flow indicator
+    if (currentTime >= (flowSensorTime + FLOW_SENSOR_READ_INTERVAL)) {
+      flowSensorTime = currentTime;
+      flowRate1 = readFlowSensor(flow_frequency1, 1);
+      flowRate2 = readFlowSensor(flow_frequency2, 2);
+      newFlowIndicator = 'Y';
+    } else {
+      newFlowIndicator = 'N';
+    }
+  }
 
   printSensorValues(newFlowIndicator, flowRate1, flowRate2,
                     pressureValueRaw1, pressureValue1, pressureValueRaw2, pressureValue2,
