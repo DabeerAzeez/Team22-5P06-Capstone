@@ -5,6 +5,11 @@ classdef CCTA_exported < matlab.apps.AppBase
         UIFigure                        matlab.ui.Figure
         TabGroup2                       matlab.ui.container.TabGroup
         MainTab                         matlab.ui.container.Tab
+        PumpControlPanel                matlab.ui.container.Panel
+        ControlModeSwitch               matlab.ui.control.Switch
+        ControlModeSwitchLabel          matlab.ui.control.Label
+        PumpPowerSlider                 matlab.ui.control.Slider
+        PumpPowerSliderLabel            matlab.ui.control.Label
         ConnectedLamp                   matlab.ui.control.Lamp
         COMPortDropDown                 matlab.ui.control.DropDown
         COMPortLabel                    matlab.ui.control.Label
@@ -58,15 +63,9 @@ classdef CCTA_exported < matlab.apps.AppBase
         Pressure2_SetPoint              matlab.ui.control.NumericEditField
         Pressure1_SetPoint              matlab.ui.control.NumericEditField
         Label                           matlab.ui.control.Label
-        SettingsTab                     matlab.ui.container.Tab
-        FlowPumpControlPanel            matlab.ui.container.Panel
-        ControlSwitch                   matlab.ui.control.Switch
-        ControlSwitchLabel              matlab.ui.control.Label
-        PumpPowerSlider                 matlab.ui.control.Slider
-        PumpPowerSliderLabel            matlab.ui.control.Label
-        AnalogWriteValueEditField       matlab.ui.control.NumericEditField
-        AnalogWriteValueEditFieldLabel  matlab.ui.control.Label
-        OPENVALVEButton                 matlab.ui.control.Button
+        SettingsOtherInfoTab            matlab.ui.container.Tab
+        PumpAnalogWriteValue0255EditField  matlab.ui.control.NumericEditField
+        PumpAnalogWriteValue0255EditFieldLabel  matlab.ui.control.Label
         PUMPOFFButton                   matlab.ui.control.Button
         PUMPONButton                    matlab.ui.control.Button
         PressureValveControlPanel       matlab.ui.container.Panel
@@ -354,11 +353,8 @@ classdef CCTA_exported < matlab.apps.AppBase
                     legend(app.FlowAxes, 'show','Location','northwest');
                 end
 
-                % writeline(app.arduinoObj, sprintf("Pressure Motor Step Number: %d, Pump Duty Cycle: %d",100,randi([0,255])));
-                % app.WaitForArduinoMessage();
-
                 % Update PID Outputs
-                if app.PumpControlMode == "PID"
+                if app.PumpControlMode == "Auto"
                     app.updatePIDOutputs();
                 end
 
@@ -375,10 +371,13 @@ classdef CCTA_exported < matlab.apps.AppBase
         function setControlMode(app,mode)
             if lower(mode) == "manual"
                 app.PumpControlMode = "Manual";
-                app.ControlSwitch.Value = "Manual";
-            elseif lower(mode) == "pid"
-                app.PumpControlMode = "PID";
-                app.ControlSwitch.Value = "PID";
+                app.ControlModeSwitch.Value = "Manual";
+                app.ControlModeSwitch.Enable = "off";  % to prevent user from switching toggle when they should just input a setpoint
+                highlightSetPointUI(app, "None");
+            elseif lower(mode) == "auto"
+                app.PumpControlMode = "Auto";
+                app.ControlModeSwitch.Value = "Auto";
+                app.ControlModeSwitch.Enable = "on";
             else
                 warning("Invalid control mode selected.");
             end
@@ -387,7 +386,7 @@ classdef CCTA_exported < matlab.apps.AppBase
         function sendControlValuesToArduino(app)
             app.MotorStepNumberEditField.Value = app.pressureMotorPosition;
 
-            if lower(app.PumpControlMode) == "pid"
+            if lower(app.PumpControlMode) == "auto"
                 % Update control values based on PID algorithm
                 app.flowDutyCycle = app.flowDutyCycle + round(app.PID_output);
 
@@ -404,20 +403,11 @@ classdef CCTA_exported < matlab.apps.AppBase
             end
 
             % Update flow pump control UI
-            app.AnalogWriteValueEditField.Value = app.flowDutyCycle;
+            app.PumpAnalogWriteValue0255EditField.Value = app.flowDutyCycle;
             app.PumpPowerSlider.Value = app.flowDutyCycle / app.ARDUINO_ANALOGWRITE_MAX * app.PumpPowerSlider.Limits(2);
 
             % Send command to Arduino
-            % command = sprintf("Pressure Motor Step Number: %d, Pump Duty Cycle: %d",app.pressureMotorPosition,app.flowDutyCycle);
-            % writeline(app.arduinoObj,command);
-            % app.WaitForArduinoMessage();
-
-            f = parfeval(@testAsync, 0);
-        end
-
-        function testAsync(app)
-            % Send command to Arduino
-            command = sprintf("Pressure Motor Step Number: %d, Pump Duty Cycle: %d",app.pressureMotorPosition,app.flowDutyCycle);
+            command = sprintf("MOT: %d, PMP: %d",app.pressureMotorPosition,app.flowDutyCycle);
             writeline(app.arduinoObj,command);
             app.WaitForArduinoMessage();
         end
@@ -681,7 +671,7 @@ classdef CCTA_exported < matlab.apps.AppBase
         % Value changed function: Pressure1_SetPoint
         function Pressure1_SetPointValueChanged(app, event)
             app.PID_setpoint = app.Pressure1_SetPoint.Value;
-            app.setControlMode("PID");
+            app.setControlMode("Auto");
             app.setPIDCoefficients("Pressure");
             app.highlightSetPointUI("Pressure1");
             app.PID_setpoint_id = "Pressure1";
@@ -701,6 +691,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             percent_closed = app.ClosedSlider.Value/app.ClosedSlider.Limits(2);  % negative because gear rotates valve the other way
             app.pressureMotorPosition = round(app.MAX_PRESSURE_MOTOR_POSITION * percent_closed);
 
+            highlightSetPointUI(app, "None");
             flushoutput(app.arduinoObj);  % in case this was done in the middle of sending another command
             app.sendControlValuesToArduino();
         end
@@ -713,16 +704,16 @@ classdef CCTA_exported < matlab.apps.AppBase
         % Value changed function: PumpPowerSlider
         function PumpPowerSliderValueChanged(app, event)
             app.flowDutyCycle = round(app.PumpPowerSlider.Value/app.PumpPowerSlider.Limits(2)*app.ARDUINO_ANALOGWRITE_MAX);
-            app.AnalogWriteValueEditField.Value = app.flowDutyCycle;
+            app.PumpAnalogWriteValue0255EditField.Value = app.flowDutyCycle;
             app.setControlMode("Manual");
 
             flushoutput(app.arduinoObj);  % in case this was done in the middle of sending another command
             app.sendControlValuesToArduino();
         end
 
-        % Value changed function: AnalogWriteValueEditField
-        function AnalogWriteValueEditFieldValueChanged(app, event)
-            value = app.AnalogWriteValueEditField.Value;
+        % Value changed function: PumpAnalogWriteValue0255EditField
+        function PumpAnalogWriteValue0255EditFieldValueChanged(app, event)
+            value = app.PumpAnalogWriteValue0255EditField.Value;
             app.flowDutyCycle = value;
             app.PumpPowerSlider.Value = value/app.ARDUINO_ANALOGWRITE_MAX * app.PumpPowerSlider.Limits(2);  % update slider
             app.setControlMode("Manual");
@@ -757,22 +748,22 @@ classdef CCTA_exported < matlab.apps.AppBase
         % Value changed function: Flow1_SetPoint
         function Flow1_SetPointValueChanged(app, event)
             app.PID_setpoint = app.Flow1_SetPoint.Value;
-            app.setControlMode("PID");
+            app.setControlMode("Auto");
             app.setPIDCoefficients("Flow");
             app.highlightSetPointUI("Flow1");
             app.PID_setpoint_id = "Flow1";
         end
 
-        % Value changed function: ControlSwitch
-        function ControlSwitchValueChanged(app, event)
-            app.setControlMode(app.ControlSwitch.Value);
+        % Value changed function: ControlModeSwitch
+        function ControlModeSwitchValueChanged(app, event)
+            app.setControlMode(app.ControlModeSwitch.Value);
             app.highlightSetPointUI("None");
         end
 
         % Value changed function: Flow2_SetPoint
         function Flow2_SetPointValueChanged(app, event)
             app.PID_setpoint = app.Flow2_SetPoint.Value;
-            app.setControlMode("PID");
+            app.setControlMode("Auto");
             app.setPIDCoefficients("Flow");
             app.highlightSetPointUI("Flow2");
             app.PID_setpoint_id = "Flow2";
@@ -781,7 +772,7 @@ classdef CCTA_exported < matlab.apps.AppBase
         % Value changed function: Pressure2_SetPoint
         function Pressure2_SetPointValueChanged(app, event)
             app.PID_setpoint = app.Pressure2_SetPoint.Value;
-            app.setControlMode("PID");
+            app.setControlMode("Auto");
             app.setPIDCoefficients("Pressure");
             app.highlightSetPointUI("Pressure2");
             app.PID_setpoint_id = "Pressure2";
@@ -790,7 +781,7 @@ classdef CCTA_exported < matlab.apps.AppBase
         % Value changed function: Pressure3_SetPoint
         function Pressure3_SetPointValueChanged(app, event)
             app.PID_setpoint = app.Pressure3_SetPoint.Value;
-            app.setControlMode("PID");
+            app.setControlMode("Auto");
             app.setPIDCoefficients("Pressure");
             app.highlightSetPointUI("Pressure3");
             app.PID_setpoint_id = "Pressure3";
@@ -1149,17 +1140,51 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.ConnectedLamp.Position = [1064 84 20 20];
             app.ConnectedLamp.Color = [0.8 0.8 0.8];
 
-            % Create SettingsTab
-            app.SettingsTab = uitab(app.TabGroup2);
-            app.SettingsTab.Title = 'Settings';
+            % Create PumpControlPanel
+            app.PumpControlPanel = uipanel(app.MainTab);
+            app.PumpControlPanel.Title = 'Pump Control';
+            app.PumpControlPanel.BackgroundColor = [0.902 0.902 0.902];
+            app.PumpControlPanel.FontWeight = 'bold';
+            app.PumpControlPanel.Position = [15 70 298 124];
+
+            % Create PumpPowerSliderLabel
+            app.PumpPowerSliderLabel = uilabel(app.PumpControlPanel);
+            app.PumpPowerSliderLabel.HorizontalAlignment = 'right';
+            app.PumpPowerSliderLabel.FontWeight = 'bold';
+            app.PumpPowerSliderLabel.Position = [10 39 95 22];
+            app.PumpPowerSliderLabel.Text = 'Pump Power  %';
+
+            % Create PumpPowerSlider
+            app.PumpPowerSlider = uislider(app.PumpControlPanel);
+            app.PumpPowerSlider.ValueChangedFcn = createCallbackFcn(app, @PumpPowerSliderValueChanged, true);
+            app.PumpPowerSlider.Position = [126 48 150 3];
+
+            % Create ControlModeSwitchLabel
+            app.ControlModeSwitchLabel = uilabel(app.PumpControlPanel);
+            app.ControlModeSwitchLabel.HorizontalAlignment = 'center';
+            app.ControlModeSwitchLabel.FontWeight = 'bold';
+            app.ControlModeSwitchLabel.Position = [12 70 82 22];
+            app.ControlModeSwitchLabel.Text = 'Control Mode';
+
+            % Create ControlModeSwitch
+            app.ControlModeSwitch = uiswitch(app.PumpControlPanel, 'slider');
+            app.ControlModeSwitch.Items = {'Manual', 'Auto'};
+            app.ControlModeSwitch.ValueChangedFcn = createCallbackFcn(app, @ControlModeSwitchValueChanged, true);
+            app.ControlModeSwitch.Enable = 'off';
+            app.ControlModeSwitch.Position = [189 71 45 20];
+            app.ControlModeSwitch.Value = 'Manual';
+
+            % Create SettingsOtherInfoTab
+            app.SettingsOtherInfoTab = uitab(app.TabGroup2);
+            app.SettingsOtherInfoTab.Title = 'Settings & Other Info.';
 
             % Create SimulateDataCheckBox
-            app.SimulateDataCheckBox = uicheckbox(app.SettingsTab);
+            app.SimulateDataCheckBox = uicheckbox(app.SettingsOtherInfoTab);
             app.SimulateDataCheckBox.Text = 'Simulate Data?';
             app.SimulateDataCheckBox.Position = [26 459 104 22];
 
             % Create PressureValveControlPanel
-            app.PressureValveControlPanel = uipanel(app.SettingsTab);
+            app.PressureValveControlPanel = uipanel(app.SettingsOtherInfoTab);
             app.PressureValveControlPanel.Title = 'Pressure Valve Control';
             app.PressureValveControlPanel.Position = [26 296 260 141];
 
@@ -1192,7 +1217,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.ClosedSlider.Position = [86 42 150 3];
 
             % Create PUMPONButton
-            app.PUMPONButton = uibutton(app.SettingsTab, 'push');
+            app.PUMPONButton = uibutton(app.SettingsOtherInfoTab, 'push');
             app.PUMPONButton.BackgroundColor = [0.4667 0.6745 0.1882];
             app.PUMPONButton.FontSize = 14;
             app.PUMPONButton.FontWeight = 'bold';
@@ -1201,7 +1226,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.PUMPONButton.Text = 'PUMP ON';
 
             % Create PUMPOFFButton
-            app.PUMPOFFButton = uibutton(app.SettingsTab, 'push');
+            app.PUMPOFFButton = uibutton(app.SettingsOtherInfoTab, 'push');
             app.PUMPOFFButton.BackgroundColor = [1 0 0];
             app.PUMPOFFButton.FontSize = 14;
             app.PUMPOFFButton.FontWeight = 'bold';
@@ -1209,59 +1234,19 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.PUMPOFFButton.Position = [170 248 129 29];
             app.PUMPOFFButton.Text = 'PUMP OFF';
 
-            % Create OPENVALVEButton
-            app.OPENVALVEButton = uibutton(app.SettingsTab, 'push');
-            app.OPENVALVEButton.BackgroundColor = [0.9294 0.6941 0.1255];
-            app.OPENVALVEButton.FontSize = 14;
-            app.OPENVALVEButton.FontWeight = 'bold';
-            app.OPENVALVEButton.Enable = 'off';
-            app.OPENVALVEButton.Position = [23 205 129 29];
-            app.OPENVALVEButton.Text = 'OPEN VALVE';
+            % Create PumpAnalogWriteValue0255EditFieldLabel
+            app.PumpAnalogWriteValue0255EditFieldLabel = uilabel(app.SettingsOtherInfoTab);
+            app.PumpAnalogWriteValue0255EditFieldLabel.HorizontalAlignment = 'right';
+            app.PumpAnalogWriteValue0255EditFieldLabel.FontWeight = 'bold';
+            app.PumpAnalogWriteValue0255EditFieldLabel.Position = [332 415 193 22];
+            app.PumpAnalogWriteValue0255EditFieldLabel.Text = 'Pump Analog Write Value (0-255)';
 
-            % Create FlowPumpControlPanel
-            app.FlowPumpControlPanel = uipanel(app.SettingsTab);
-            app.FlowPumpControlPanel.Title = 'Flow Pump Control';
-            app.FlowPumpControlPanel.Position = [313 268 306 170];
-
-            % Create AnalogWriteValueEditFieldLabel
-            app.AnalogWriteValueEditFieldLabel = uilabel(app.FlowPumpControlPanel);
-            app.AnalogWriteValueEditFieldLabel.HorizontalAlignment = 'right';
-            app.AnalogWriteValueEditFieldLabel.FontWeight = 'bold';
-            app.AnalogWriteValueEditFieldLabel.Position = [13 73 113 22];
-            app.AnalogWriteValueEditFieldLabel.Text = 'Analog Write Value';
-
-            % Create AnalogWriteValueEditField
-            app.AnalogWriteValueEditField = uieditfield(app.FlowPumpControlPanel, 'numeric');
-            app.AnalogWriteValueEditField.Limits = [0 255];
-            app.AnalogWriteValueEditField.RoundFractionalValues = 'on';
-            app.AnalogWriteValueEditField.ValueChangedFcn = createCallbackFcn(app, @AnalogWriteValueEditFieldValueChanged, true);
-            app.AnalogWriteValueEditField.Position = [141 73 100 22];
-
-            % Create PumpPowerSliderLabel
-            app.PumpPowerSliderLabel = uilabel(app.FlowPumpControlPanel);
-            app.PumpPowerSliderLabel.HorizontalAlignment = 'right';
-            app.PumpPowerSliderLabel.FontWeight = 'bold';
-            app.PumpPowerSliderLabel.Position = [13 40 95 22];
-            app.PumpPowerSliderLabel.Text = 'Pump Power  %';
-
-            % Create PumpPowerSlider
-            app.PumpPowerSlider = uislider(app.FlowPumpControlPanel);
-            app.PumpPowerSlider.ValueChangedFcn = createCallbackFcn(app, @PumpPowerSliderValueChanged, true);
-            app.PumpPowerSlider.Position = [129 49 150 3];
-
-            % Create ControlSwitchLabel
-            app.ControlSwitchLabel = uilabel(app.FlowPumpControlPanel);
-            app.ControlSwitchLabel.HorizontalAlignment = 'center';
-            app.ControlSwitchLabel.FontWeight = 'bold';
-            app.ControlSwitchLabel.Position = [17 116 48 22];
-            app.ControlSwitchLabel.Text = 'Control';
-
-            % Create ControlSwitch
-            app.ControlSwitch = uiswitch(app.FlowPumpControlPanel, 'slider');
-            app.ControlSwitch.Items = {'Manual', 'PID'};
-            app.ControlSwitch.ValueChangedFcn = createCallbackFcn(app, @ControlSwitchValueChanged, true);
-            app.ControlSwitch.Position = [123 117 45 20];
-            app.ControlSwitch.Value = 'Manual';
+            % Create PumpAnalogWriteValue0255EditField
+            app.PumpAnalogWriteValue0255EditField = uieditfield(app.SettingsOtherInfoTab, 'numeric');
+            app.PumpAnalogWriteValue0255EditField.Limits = [0 255];
+            app.PumpAnalogWriteValue0255EditField.RoundFractionalValues = 'on';
+            app.PumpAnalogWriteValue0255EditField.ValueChangedFcn = createCallbackFcn(app, @PumpAnalogWriteValue0255EditFieldValueChanged, true);
+            app.PumpAnalogWriteValue0255EditField.Position = [540 415 100 22];
 
             % Show the figure after all components are created
             app.UIFigure.Visible = 'on';
