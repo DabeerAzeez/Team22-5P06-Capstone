@@ -47,6 +47,8 @@ char newFlowIndicator = 'N';  // Indicates whether a new flow reading is availab
 int pressureMotorStepNumber = 0;     // For controlling the pressure valve motor
 int pressureMotorDelayMicroseconds;  // time off for pressure motor per stepper motor pulse;  3500 (normal) / 25000 (resetting)
 int pumpAnalogWrite = 128;           // For controlling the pump
+String inputString = "";             // a String to hold incoming data
+bool stringComplete = false;         // whether the string is complete
 
 /**
  * Interrupt service routines for the flow sensors.
@@ -75,6 +77,7 @@ void setup() {
 
   // === SERIAL COMMUNICATION SETUP ===
   Serial.begin(115200);
+  inputString.reserve(200);  // reserve 200 bytes for the inputString
 
   // === MISCELLANEOUS SETUP ===
   analogReference(EXTERNAL);
@@ -84,9 +87,6 @@ void setup() {
   flowSensorTime = currentTime;
   pressureSensorTime = currentTime;
 
-  // pressureMotorDelayMicroseconds = 10000;     // slow down while resetting so motor isn't damaged when valve locks
-  // rotateMotorByStep(-MAX_STEPS);              // reset valve position to 100% closed
-  // rotateMotorByStep(round(MAX_STEPS * 0.7));  // Move to 30% closed (tough to spin valve at values lower than this)
   pressureMotorDelayMicroseconds = 10000;  // speed up for normal use
 
   analogWrite(PUMP_PWM_PIN, pumpAnalogWrite);
@@ -99,9 +99,11 @@ void setup() {
 void loop() {
   currentTime = millis();
 
-  // Check serial comms for control messages
-  if (Serial.available() > EXPECTED_MATLAB_MESSAGE_LENGTH) {
-    processSerial();
+  // Check whether a complete string has come in over Serial
+  if (stringComplete) {
+    processSerial(inputString);
+    inputString = "";
+    stringComplete = false;
   }
 
   // Read pressure sensor values at defined intervals
@@ -210,31 +212,34 @@ void rotateMotorByAngle(float degrees) {
 }
 
 /*
+  SerialEvent occurs whenever a new data comes in the hardware serial RX. This
+  routine is run between each time loop() runs, so using delay inside loop can
+  delay response. Multiple bytes of data may be available.
+*/
+void serialEvent() {
+  while (Serial.available()) {
+    // get the new byte:
+    char inChar = (char)Serial.read();
+    // add it to the inputString:
+    inputString += inChar;
+    // if the incoming character is a newline, set a flag so the main loop can
+    // do something about it:
+    if (inChar == '\n') {
+      stringComplete = true;
+    }
+  }
+}
+
+/*
  * Processes incoming serial commands to control relevant outputs. Currently supports just the motor for the pressure valve. 
  * Assumes Example string: "Pressure Motor Step Number: (0-1400), Flow Motor Voltage: (0-255)"
 */
-void processSerial() {
-  String command = Serial.readStringUntil("\n");
-
-  // Manually split the string by newline since readBytesUntil doesn't seem to work properly
-  int newlineIndex = command.indexOf('\n');
-  while (newlineIndex != -1) {
-    // Extract the line up to the newline
-    String line = command.substring(0, newlineIndex);
-    line.trim();
-
-    // Parse each line
-    int stepNumber;
-    if (sscanf(line.c_str(), "Pressure Motor Step Number: %d, Pump Duty Cycle: %d", &stepNumber, &pumpAnalogWrite) == 2) {
-      rotateMotorToStep(stepNumber);
-      analogWrite(PUMP_PWM_PIN, pumpAnalogWrite);
-    }
-
-    // Remove this line (and the newline character) from 'command'
-    command.remove(0, newlineIndex + 1);
-
-    // Check if there's another newline in the remaining string
-    newlineIndex = command.indexOf('\n');
+void processSerial(String inputString) {
+  // Parse each line
+  int stepNumber;
+  if (sscanf(inputString.c_str(), "MOT: %d, PMP: %d", &stepNumber, &pumpAnalogWrite) == 2) {
+    rotateMotorToStep(stepNumber);
+    analogWrite(PUMP_PWM_PIN, pumpAnalogWrite);
   }
 }
 
