@@ -5,23 +5,27 @@ classdef CCTA_exported < matlab.apps.AppBase
         UIFigure                        matlab.ui.Figure
         TabGroup2                       matlab.ui.container.TabGroup
         MainTab                         matlab.ui.container.Tab
-        Panel_4                         matlab.ui.container.Panel
+        GraphOptionsPanel               matlab.ui.container.Panel
+        GraphOptionsLabel               matlab.ui.control.Label
+        ExportDataButton                matlab.ui.control.Button
+        ClearDataButton                 matlab.ui.control.Button
+        PauseGraphsButton               matlab.ui.control.StateButton
+        Panel_5                         matlab.ui.container.Panel
+        ConnectionDropDown              matlab.ui.control.DropDown
+        COMPortLabel                    matlab.ui.control.Label
+        ConnectedLamp                   matlab.ui.control.Lamp
+        Button                          matlab.ui.control.Button
+        ConnectButton                   matlab.ui.control.Button
+        FlowGraphPanel                  matlab.ui.container.Panel
+        FlowAxesWaitingForConnectionLabel  matlab.ui.control.Label
         FlowAxes                        matlab.ui.control.UIAxes
         PumpControlPanel                matlab.ui.container.Panel
         ControlModeSwitch               matlab.ui.control.Switch
         ControlModeSwitchLabel          matlab.ui.control.Label
         PumpPowerSlider                 matlab.ui.control.Slider
         PumpPowerSliderLabel            matlab.ui.control.Label
-        ConnectedLamp                   matlab.ui.control.Lamp
-        COMPortDropDown                 matlab.ui.control.DropDown
-        COMPortLabel                    matlab.ui.control.Label
-        GraphOptionsLabel               matlab.ui.control.Label
-        RefreshListButton               matlab.ui.control.Button
-        ExportDataButton                matlab.ui.control.Button
-        ClearDataButton                 matlab.ui.control.Button
-        ConnectButton                   matlab.ui.control.Button
-        HoldGraphsButton                matlab.ui.control.StateButton
-        Panel                           matlab.ui.container.Panel
+        PressureGraphPanel              matlab.ui.container.Panel
+        PressureAxesWaitingForConnectionLabel  matlab.ui.control.Label
         PressureAxes                    matlab.ui.control.UIAxes
         FlowMonitoringControlPanel      matlab.ui.container.Panel
         Label_9                         matlab.ui.control.Label
@@ -36,7 +40,7 @@ classdef CCTA_exported < matlab.apps.AppBase
         Label_4                         matlab.ui.control.Label
         Flow1_EditField_Current         matlab.ui.control.NumericEditField
         Label_3                         matlab.ui.control.Label
-        SetpointLabel_2                 matlab.ui.control.Label
+        TargetLabel_2                   matlab.ui.control.Label
         CurrentLabel_2                  matlab.ui.control.Label
         Flow2_SetPoint                  matlab.ui.control.NumericEditField
         Flow1_SetPoint                  matlab.ui.control.NumericEditField
@@ -58,14 +62,14 @@ classdef CCTA_exported < matlab.apps.AppBase
         Label_6                         matlab.ui.control.Label
         Pressure1_EditField_Current     matlab.ui.control.NumericEditField
         Label_5                         matlab.ui.control.Label
-        SetpointLabel                   matlab.ui.control.Label
+        TargetLabel                     matlab.ui.control.Label
         CurrentLabel                    matlab.ui.control.Label
         Pressure3_SetPoint              matlab.ui.control.NumericEditField
         Pressure2_SetPoint              matlab.ui.control.NumericEditField
         Pressure1_SetPoint              matlab.ui.control.NumericEditField
         Label                           matlab.ui.control.Label
         SettingsOtherInfoTab            matlab.ui.container.Tab
-        Panel_3                         matlab.ui.container.Panel
+        FlowCoefficientsPanel           matlab.ui.container.Panel
         KdEditFieldLabel                matlab.ui.control.Label
         KdFlowEditField                 matlab.ui.control.NumericEditField
         KiFlowEditField                 matlab.ui.control.NumericEditField
@@ -73,7 +77,7 @@ classdef CCTA_exported < matlab.apps.AppBase
         KpFlowEditField                 matlab.ui.control.NumericEditField
         KpEditFieldLabel                matlab.ui.control.Label
         FlowControlLabel                matlab.ui.control.Label
-        Panel_2                         matlab.ui.container.Panel
+        PressureCoefficientsPanel       matlab.ui.container.Panel
         KdEditField_2Label              matlab.ui.control.Label
         KdPressureEditField             matlab.ui.control.NumericEditField
         KiPressureEditField             matlab.ui.control.NumericEditField
@@ -100,7 +104,16 @@ classdef CCTA_exported < matlab.apps.AppBase
         ARDUINO_ANALOGWRITE_MAX = 255;
         ARDUINO_SERIAL_BITRATE = 115200;
 
+        % Colors
+        PRESSURE_COLOR = [0.84 0.83 0.86];
+        FLOW_COLOR = [0.77,0.83,0.76];
+        BUTTON_COLOR_DEFAULT = [0.94,0.94,0.94];
+        BUTTON_COLOR1 = [0.16,0.57,0.84];
+        COLOR_DISCONNECTED = [1.00,0.00,0.00];
+        COLOR_CONNECTED = [0, 1, 0];
+
         arduinoObj;
+        isConnected;
         tempLogFile = fullfile(pwd, 'console_output_temp.txt');  % Define a persistent temporary log file that always stores session history
 
         t = [];
@@ -277,15 +290,11 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.pressure_vals1 = [];
             app.pressure_vals2 = [];
             app.pressure_vals3 = [];
-
-            pause(app.dt_refresh);
-
-            app.runMainLoop();  % Re-run it here from the beginning to reset time array properly
         end
        
         
         function runMainLoop(app)
-            while (1)
+            while (app.isConnected)
                 line = app.getArduinoData();
 
                 % Read sensor data
@@ -323,54 +332,7 @@ classdef CCTA_exported < matlab.apps.AppBase
                 app.Flow1_EditField_Current.Value = flow_value1;
                 app.Flow2_EditField_Current.Value = flow_value2;
 
-                % Plot pressure data based on checkbox selections
-                % as long as "hold graph" is not pressed
-                if app.HoldGraphsButton.Value == false
-                    hold(app.PressureAxes, 'on');
-                    cla(app.PressureAxes); % Clear previous plots
-
-                    hexColors_Pressure = {'#8c819b', '#d6d3db', '#000000'};
-                    rgbColors_Pressure = cellfun(@(c) sscanf(c(2:end), '%2x%2x%2x', [1 3])' / 255, hexColors_Pressure, 'UniformOutput', false);
-                    lineWidth = 1.5;
-
-                    if app.Pressure1_GraphEnable.Value
-                        plot(app.PressureAxes, app.t, app.pressure_vals1, '--', 'Color', rgbColors_Pressure{1}, 'DisplayName', app.pressure1_label, 'LineWidth', lineWidth);
-                    end
-                    if app.Pressure2_GraphEnable.Value
-                        plot(app.PressureAxes, app.t, app.pressure_vals2, '-', 'Color', rgbColors_Pressure{2}, 'DisplayName', app.pressure2_label, 'LineWidth', lineWidth);
-                    end
-                    if app.Pressure3_GraphEnable.Value
-                        plot(app.PressureAxes, app.t, app.pressure_vals3, '-.', 'Color', rgbColors_Pressure{3}, 'DisplayName', app.pressure3_label, 'LineWidth', lineWidth);
-                    end
-
-                    hold(app.PressureAxes, 'off');
-                    title(app.PressureAxes, 'Pressure Data');
-                    xlabel(app.PressureAxes, 'Time (s)');
-                    ylabel(app.PressureAxes, 'Pressure (mmHg)');
-                    ylim(app.PressureAxes, [0 100]);
-                    legend(app.PressureAxes, 'show','Location','northwest');
-
-                    % Plot flow data based on checkbox selections
-                    hold(app.FlowAxes, 'on');
-                    cla(app.FlowAxes); % Clear previous plots
-
-                    hexColors_Flow = {'#4a5c3f', '#2e4030'};
-                    rgbColors_Flow = cellfun(@(c) sscanf(c(2:end), '%2x%2x%2x', [1 3])' / 255, hexColors_Flow, 'UniformOutput', false);
-
-                    if app.Flow1_GraphEnable.Value
-                        plot(app.FlowAxes, app.t, app.flow_vals1, '--', 'Color', rgbColors_Flow{1}, 'DisplayName', app.flow1_label, 'LineWidth', lineWidth);
-                    end
-                    if app.Flow2_GraphEnable.Value
-                        plot(app.FlowAxes, app.t, app.flow_vals2, '-', 'Color', rgbColors_Flow{2}, 'DisplayName', app.flow2_label, 'LineWidth', lineWidth);
-                    end
-
-                    hold(app.FlowAxes, 'off');
-                    title(app.FlowAxes, 'Flow Data');
-                    xlabel(app.FlowAxes, 'Time (s)');
-                    ylabel(app.FlowAxes, 'Flow (L/min)');
-                    ylim(app.FlowAxes, [0 5]);
-                    legend(app.FlowAxes, 'show','Location','northwest');
-                end
+                app.updateDataPlots();
 
                 % Update PID Outputs
                 if app.PumpControlMode == "Auto"
@@ -426,9 +388,11 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.PumpPowerSlider.Value = app.flowDutyCycle / app.ARDUINO_ANALOGWRITE_MAX * app.PumpPowerSlider.Limits(2);
 
             % Send command to Arduino
-            command = sprintf("MOT: %d, PMP: %d",app.pressureMotorPosition,app.flowDutyCycle);
-            writeline(app.arduinoObj,command);
-            app.WaitForArduinoMessage();
+            if app.SimulateDataCheckBox.Value == false
+                command = sprintf("MOT: %d, PMP: %d",app.pressureMotorPosition,app.flowDutyCycle);
+                writeline(app.arduinoObj,command);
+                app.WaitForArduinoMessage();
+            end
         end
         
         function updatePIDOutputs(app)
@@ -501,8 +465,8 @@ classdef CCTA_exported < matlab.apps.AppBase
             end
 
             % Update dropdown with formatted port names
-            app.COMPortDropDown.Items = portInfo;
-            app.COMPortDropDown.ItemsData = ports;  % To allow proper connections when using serialport() later off of the selected dropdown value
+            app.ConnectionDropDown.Items = portInfo;
+            app.ConnectionDropDown.ItemsData = ports;  % To allow proper connections when using serialport() later off of the selected dropdown value
         end
         
         function setValveControlPanelEnabled(app, value)
@@ -529,30 +493,42 @@ classdef CCTA_exported < matlab.apps.AppBase
 
             % Iterate through all setpoints and update colors
             fieldNames = fieldnames(setpoints);
+
             for i = 1:length(fieldNames)
+                % Get handle to the UI element
+                uiElement = setpoints.(fieldNames{i});
+
+                onColor = [0 1 0];
+                offColor = [1 1 1];
+
                 if strcmp(fieldNames{i}, setpointID)
-                    setpoints.(fieldNames{i}).BackgroundColor = 'green';
+                    if isequal(uiElement.BackgroundColor, onColor)
+                        uiElement.BackgroundColor = offColor;
+                        pause(0.2);  % if it's already green, flash it white briefly to show that a new value is being set
+                        uiElement.BackgroundColor = onColor;
+                    else
+                        uiElement.BackgroundColor = onColor;
+                    end
                 else
-                    setpoints.(fieldNames{i}).BackgroundColor = 'white';
+                    uiElement.BackgroundColor = offColor;
                 end
             end
+
         end
 
         
         function setUpArduinoConnection(app)
-            app.arduinoObj = serialport(app.COMPortDropDown.Value, app.ARDUINO_SERIAL_BITRATE);
+            app.arduinoObj = serialport(app.ConnectionDropDown.Value, app.ARDUINO_SERIAL_BITRATE);
             configureTerminator(app.arduinoObj, "LF"); % Assuming newline ('\n') terminates messages
             app.arduinoObj.Timeout = 5; % Timeout for read operations 
 
-            while app.arduinoObj.NumBytesAvailable == 0
-                pause(0.1);  % wait for initial to come in
-            end
+            app.WaitForArduinoMessage();
         end
         
         function line = getArduinoData(app)
             if app.SimulateDataCheckBox.Value
                 % Simulate data in GUI (for testing)
-                line = "New Flow?: N, Flow Raw 1: 0, Flow 1: 1.50 L/min, Flow Raw 2: 0, Flow 2: 2.50 L/min, Pressure Raw 1: 1023, Pressure 1: 20 mmHg, Pressure Raw 2: 1023, Pressure 2: 50 mmHg, Pressure Raw 3: 1023, Pressure 3: 80 mmHg\n";
+                line = "NF: N, F1: 1.50 L/min, F2: 2.50 L/min, P1R: 1023, P1: 20 mmHg, P2R: 1023, P2: 50 mmHg, P3R: 1023, P3: 80 mmHg, Pump: 128/255\n";
             else
                 if app.arduinoObj.NumBytesAvailable > 0
                     flushinput(app.arduinoObj);
@@ -561,8 +537,9 @@ classdef CCTA_exported < matlab.apps.AppBase
                 else
                     line = [];
                 end
-                pause(0.1); % Small delay to prevent CPU overuse
             end
+
+            pause(0.1); % Small delay to prevent CPU overuse
         end
         
         function WaitForArduinoMessage(app)
@@ -581,6 +558,181 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.KiPressureEditField.Value = app.Ki_pressure;
             app.KdPressureEditField.Value = app.Kd_pressure; 
         end
+        
+        function updateUIColors(app)
+            % Color all pressure-related elements
+            pressureElements = [app.PressureMonitoringControlPanel, ...
+                app.PressureGraphPanel, ...
+                app.PressureCoefficientsPanel];
+
+            for pressureElement = pressureElements
+                pressureElement.BackgroundColor = app.PRESSURE_COLOR;
+            end
+
+            % Color all flow-related elements
+            flowElements = [app.FlowMonitoringControlPanel, ...
+                app.FlowGraphPanel, ...
+                app.FlowCoefficientsPanel];
+
+            for flowElement = flowElements
+                flowElement.BackgroundColor = app.FLOW_COLOR;
+            end
+
+            % Other things
+            app.ConnectButton.BackgroundColor = app.COLOR_DISCONNECTED;
+
+            app.GraphOptionsLabel.FontColor = app.BUTTON_COLOR1;
+            graphOptionsElements = [app.ClearDataButton, app.ExportDataButton, app.PauseGraphsButton];
+
+            for element = graphOptionsElements
+                element.BackgroundColor = app.BUTTON_COLOR1;
+            end
+
+            app.PressureAxes.Title.Color = [0.5, 0.5, 0.5];
+            app.FlowAxes.Title.Color = [0.5, 0.5, 0.5];
+            
+        end
+        
+        function enableUIAfterConnection(app)
+            % Extract and flatten all UI elements into a single array
+            uiElementsToEnable = [
+                app.PressureMonitoringControlPanel.Children(:);
+                app.FlowMonitoringControlPanel.Children(:);
+                app.PumpPowerSlider;
+                app.GraphOptionsPanel.Children(:)
+                ];
+
+            % Enable each UI element
+            for uiElement = uiElementsToEnable'
+                uiElement.Enable = 'on';
+            end
+
+            % Change graph properties
+            graphTextEnabledColor = [0.15, 0.15, 0.15];  % MATLAB default
+            
+            app.PressureAxes.Color = [1 1 1];
+            app.PressureAxes.Title.Color = graphTextEnabledColor;
+            app.PressureAxes.YColor = graphTextEnabledColor;
+            app.PressureAxes.XColor = graphTextEnabledColor;
+            app.PressureAxes.Toolbar.Visible = true;
+            app.PressureAxesWaitingForConnectionLabel.Text = 'Loading...';
+            enableDefaultInteractivity(app.PressureAxes);
+
+            app.FlowAxes.Color = [1 1 1];
+            app.FlowAxes.Title.Color = graphTextEnabledColor;
+            app.FlowAxes.YColor = graphTextEnabledColor;
+            app.FlowAxes.XColor = graphTextEnabledColor;
+            app.FlowAxes.Toolbar.Visible = true;
+            app.FlowAxesWaitingForConnectionLabel.Text = 'Loading...';
+            enableDefaultInteractivity(app.FlowAxes);
+
+            % Pause to allow elements to load properly
+            pause(1);
+        end
+        
+        function connectGUI(app)
+            % Someone just connected to the serial device
+
+            % Loading bar
+            dlg = uiprogressdlg(app.UIFigure, ...
+                'Title', 'Loading...', ...
+                'Message', 'Please wait...', ...
+                'Indeterminate', 'on');
+
+            app.ConnectButton.Text = "Disconnect";
+            app.ConnectButton.BackgroundColor = app.BUTTON_COLOR_DEFAULT;
+            app.ConnectedLamp.Color = app.COLOR_CONNECTED;
+
+            if app.SimulateDataCheckBox.Value == false
+                app.setUpArduinoConnection();
+                app.setValveControlPanelEnabled(true);
+            else
+                app.setValveControlPanelEnabled(false);
+            end
+
+            app.clearDataArrays();
+            app.enableUIAfterConnection();
+            app.startLogging();
+            app.isConnected = true;
+
+            close(dlg);
+            tic;
+
+            app.runMainLoop();
+            
+        end
+        
+        function DisconnectGUI(app)
+            % Someone just disconnected from the serial device
+            app.arduinoObj = [];
+            app.setValveControlPanelEnabled(false);
+            app.ConnectButton.Text = "Connect";
+            app.ConnectButton.BackgroundColor = app.COLOR_DISCONNECTED;
+            app.ConnectedLamp.Color = app.COLOR_DISCONNECTED;
+            app.isConnected = false;
+        end
+        
+        function updateDataPlots(app)
+            % Plot data based on UI selections
+            if app.PauseGraphsButton.Value == false
+                hold(app.PressureAxes, 'on');
+                cla(app.PressureAxes); % Clear previous plots
+
+                if strcmp(app.PressureAxesWaitingForConnectionLabel.Visible,'on')
+                    % Hide "Waiting for Connection" labels on graphs if
+                    % they're still visible (i.e. first time plotting)
+                    app.PressureAxesWaitingForConnectionLabel.Visible = 'off';
+                    app.FlowAxesWaitingForConnectionLabel.Visible = 'off';
+                end
+
+                lineWidth = 1.5;
+
+                if app.Pressure1_GraphEnable.Value
+                    plot(app.PressureAxes, app.t, app.pressure_vals1, '--', 'Color', app.PRESSURE_COLOR*0.6, 'DisplayName', app.pressure1_label, 'LineWidth', lineWidth);
+                end
+                if app.Pressure2_GraphEnable.Value
+                    plot(app.PressureAxes, app.t, app.pressure_vals2, '-', 'Color', app.PRESSURE_COLOR*0.4, 'DisplayName', app.pressure2_label, 'LineWidth', lineWidth);
+                end
+                if app.Pressure3_GraphEnable.Value
+                    plot(app.PressureAxes, app.t, app.pressure_vals3, '-.', 'Color', app.PRESSURE_COLOR*0.2, 'DisplayName', app.pressure3_label, 'LineWidth', lineWidth);
+                end
+
+                if contains(app.PID_setpoint_id,"Pressure")
+                    plot(app.PressureAxes, app.t, ones(1,length(app.t))*app.PID_setpoint, '--r', 'DisplayName', 'Set Point', 'LineWidth', lineWidth)
+                end
+
+                hold(app.PressureAxes, 'off');
+                title(app.PressureAxes, 'Pressure Data');
+                xlabel(app.PressureAxes, 'Time (s)');
+                ylabel(app.PressureAxes, 'Pressure (mmHg)');
+                ylim(app.PressureAxes, [0 100]);
+                legend(app.PressureAxes, 'show','Location','northwest');
+
+                % Plot flow data based on checkbox selections
+                hold(app.FlowAxes, 'on');
+                cla(app.FlowAxes); % Clear previous plots
+
+                if app.Flow1_GraphEnable.Value
+                    plot(app.FlowAxes, app.t, app.flow_vals1, '--', 'Color', app.FLOW_COLOR*0.6, 'DisplayName', app.flow1_label, 'LineWidth', lineWidth);
+                end
+                if app.Flow2_GraphEnable.Value
+                    plot(app.FlowAxes, app.t, app.flow_vals2, '-', 'Color', app.FLOW_COLOR*0.4, 'DisplayName', app.flow2_label, 'LineWidth', lineWidth);
+                end
+
+                if contains(app.PID_setpoint_id,"Flow")
+                    plot(app.FlowAxes, app.t, ones(1,length(app.t))*app.PID_setpoint, '--r', 'DisplayName', 'Set Point', 'LineWidth', lineWidth)
+                end
+
+                hold(app.FlowAxes, 'off');
+                title(app.FlowAxes, 'Flow Data');
+                xlabel(app.FlowAxes, 'Time (s)');
+                ylabel(app.FlowAxes, 'Flow (L/min)');
+                ylim(app.FlowAxes, [0 5]);
+                legend(app.FlowAxes, 'show','Location','northwest');
+            end
+
+            pause(0.1);  % small pause to prevent CPU overuse
+        end
     end
 
 
@@ -591,7 +743,12 @@ classdef CCTA_exported < matlab.apps.AppBase
         function startupFcn(app)
             app.startLogging();
             app.updateSerialPortList();
+
+            % Update UI elements
             app.UIFigure.Name = 'Cardiac Catheterization Testing Apparatus (CCTA)';
+            disableDefaultInteractivity(app.PressureAxes);
+            disableDefaultInteractivity(app.FlowAxes);
+            app.updateUIColors();
             app.updateUIPIDCoeffs();
 
             % Other setup
@@ -602,30 +759,9 @@ classdef CCTA_exported < matlab.apps.AppBase
         function ConnectButtonPushed(app, event)
             
             if app.ConnectButton.Text == "Connect"
-                % Someone just connected to the serial device
-                app.ConnectButton.Text = "Disconnect";
-                app.ConnectedLamp.Color = "green";
-
-                if app.SimulateDataCheckBox.Value == false
-                    app.setUpArduinoConnection();
-                    app.setValveControlPanelEnabled(true);
-                else
-                    app.setValveControlPanelEnabled(false);
-                end
-
-                app.setValveControlPanelEnabled(true);
-                app.clearDataArrays();
-    
-                tic;
-                app.startLogging();
-                app.runMainLoop();
-
+                app.connectGUI();
             elseif app.ConnectButton.Text == "Disconnect"
-                % Someone just disconnected from the serial device
-                app.arduinoObj = [];
-                app.setValveControlPanelEnabled(false);
-                app.ConnectButton.Text = "Connect";
-                app.ConnectedLamp.Color = [0.80,0.80,0.80];
+                app.DisconnectGUI();
             else
                 error("Connect button container contains invalid text.")
             end
@@ -635,6 +771,7 @@ classdef CCTA_exported < matlab.apps.AppBase
         function ClearDataButtonPushed(app, event)
             % Empty time and sensor data arrays
             app.clearDataArrays();
+            app.runMainLoop();  % Re-run it here from the beginning to reset time array properly
         end
 
         % Button pushed function: ExportDataButton
@@ -713,8 +850,8 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.sendControlValuesToArduino();
         end
 
-        % Button pushed function: RefreshListButton
-        function RefreshListButtonPushed(app, event)
+        % Button pushed function: Button
+        function ButtonPushed(app, event)
             app.updateSerialPortList();
         end
 
@@ -845,6 +982,9 @@ classdef CCTA_exported < matlab.apps.AppBase
         % Create UIFigure and components
         function createComponents(app)
 
+            % Get the file path for locating images
+            pathToMLAPP = fileparts(mfilename('fullpath'));
+
             % Create UIFigure and hide until all components are created
             app.UIFigure = uifigure('Visible', 'off');
             app.UIFigure.Position = [100 100 1228 522];
@@ -852,7 +992,7 @@ classdef CCTA_exported < matlab.apps.AppBase
 
             % Create TabGroup2
             app.TabGroup2 = uitabgroup(app.UIFigure);
-            app.TabGroup2.Position = [1 -1 1229 524];
+            app.TabGroup2.Position = [1 -7 1229 530];
 
             % Create MainTab
             app.MainTab = uitab(app.TabGroup2);
@@ -863,7 +1003,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.PressureMonitoringControlPanel.Title = 'Pressure Monitoring & Control';
             app.PressureMonitoringControlPanel.BackgroundColor = [0.8392 0.8275 0.8588];
             app.PressureMonitoringControlPanel.FontWeight = 'bold';
-            app.PressureMonitoringControlPanel.Position = [15 338 298 150];
+            app.PressureMonitoringControlPanel.Position = [15 344 298 150];
 
             % Create Label
             app.Label = uilabel(app.PressureMonitoringControlPanel);
@@ -875,59 +1015,70 @@ classdef CCTA_exported < matlab.apps.AppBase
             % Create Pressure1_SetPoint
             app.Pressure1_SetPoint = uieditfield(app.PressureMonitoringControlPanel, 'numeric');
             app.Pressure1_SetPoint.ValueChangedFcn = createCallbackFcn(app, @Pressure1_SetPointValueChanged, true);
+            app.Pressure1_SetPoint.Enable = 'off';
             app.Pressure1_SetPoint.Position = [134 77 49 22];
 
             % Create Pressure2_SetPoint
             app.Pressure2_SetPoint = uieditfield(app.PressureMonitoringControlPanel, 'numeric');
             app.Pressure2_SetPoint.ValueChangedFcn = createCallbackFcn(app, @Pressure2_SetPointValueChanged, true);
+            app.Pressure2_SetPoint.Enable = 'off';
             app.Pressure2_SetPoint.Position = [134 46 49 22];
 
             % Create Pressure3_SetPoint
             app.Pressure3_SetPoint = uieditfield(app.PressureMonitoringControlPanel, 'numeric');
             app.Pressure3_SetPoint.ValueChangedFcn = createCallbackFcn(app, @Pressure3_SetPointValueChanged, true);
+            app.Pressure3_SetPoint.Enable = 'off';
             app.Pressure3_SetPoint.Position = [134 15 50 22];
 
             % Create CurrentLabel
             app.CurrentLabel = uilabel(app.PressureMonitoringControlPanel);
+            app.CurrentLabel.Enable = 'off';
             app.CurrentLabel.Position = [72 98 45 22];
             app.CurrentLabel.Text = 'Current';
 
-            % Create SetpointLabel
-            app.SetpointLabel = uilabel(app.PressureMonitoringControlPanel);
-            app.SetpointLabel.Position = [137 99 49 22];
-            app.SetpointLabel.Text = 'Setpoint';
+            % Create TargetLabel
+            app.TargetLabel = uilabel(app.PressureMonitoringControlPanel);
+            app.TargetLabel.Enable = 'off';
+            app.TargetLabel.Position = [140 97 38 22];
+            app.TargetLabel.Text = 'Target';
 
             % Create Label_5
             app.Label_5 = uilabel(app.PressureMonitoringControlPanel);
             app.Label_5.HorizontalAlignment = 'center';
+            app.Label_5.Enable = 'off';
             app.Label_5.Position = [17 77 25 22];
             app.Label_5.Text = '1';
 
             % Create Pressure1_EditField_Current
             app.Pressure1_EditField_Current = uieditfield(app.PressureMonitoringControlPanel, 'numeric');
             app.Pressure1_EditField_Current.Editable = 'off';
+            app.Pressure1_EditField_Current.Enable = 'off';
             app.Pressure1_EditField_Current.Position = [68 77 52 22];
 
             % Create Label_6
             app.Label_6 = uilabel(app.PressureMonitoringControlPanel);
             app.Label_6.HorizontalAlignment = 'center';
+            app.Label_6.Enable = 'off';
             app.Label_6.Position = [17 46 25 22];
             app.Label_6.Text = '2';
 
             % Create Pressure2_EditField_Current
             app.Pressure2_EditField_Current = uieditfield(app.PressureMonitoringControlPanel, 'numeric');
             app.Pressure2_EditField_Current.Editable = 'off';
+            app.Pressure2_EditField_Current.Enable = 'off';
             app.Pressure2_EditField_Current.Position = [68 46 52 22];
 
             % Create Label_7
             app.Label_7 = uilabel(app.PressureMonitoringControlPanel);
             app.Label_7.HorizontalAlignment = 'center';
+            app.Label_7.Enable = 'off';
             app.Label_7.Position = [17 15 25 22];
             app.Label_7.Text = '3';
 
             % Create Pressure3_EditField_Current
             app.Pressure3_EditField_Current = uieditfield(app.PressureMonitoringControlPanel, 'numeric');
             app.Pressure3_EditField_Current.Editable = 'off';
+            app.Pressure3_EditField_Current.Enable = 'off';
             app.Pressure3_EditField_Current.Position = [68 15 52 22];
 
             % Create allvaluesinmmHgLabel
@@ -939,60 +1090,69 @@ classdef CCTA_exported < matlab.apps.AppBase
             % Create SensorLabel
             app.SensorLabel = uilabel(app.PressureMonitoringControlPanel);
             app.SensorLabel.FontWeight = 'bold';
+            app.SensorLabel.Enable = 'off';
             app.SensorLabel.Position = [7 98 45 22];
             app.SensorLabel.Text = 'Sensor';
 
             % Create GraphLabel
             app.GraphLabel = uilabel(app.PressureMonitoringControlPanel);
+            app.GraphLabel.Enable = 'off';
             app.GraphLabel.Position = [249 99 45 22];
             app.GraphLabel.Text = 'Graph?';
 
             % Create Pressure3_GraphEnable
             app.Pressure3_GraphEnable = uicheckbox(app.PressureMonitoringControlPanel);
+            app.Pressure3_GraphEnable.Enable = 'off';
             app.Pressure3_GraphEnable.Text = '';
             app.Pressure3_GraphEnable.Position = [259 15 25 22];
             app.Pressure3_GraphEnable.Value = true;
 
             % Create Pressure2_GraphEnable
             app.Pressure2_GraphEnable = uicheckbox(app.PressureMonitoringControlPanel);
+            app.Pressure2_GraphEnable.Enable = 'off';
             app.Pressure2_GraphEnable.Text = '';
             app.Pressure2_GraphEnable.Position = [259 46 25 22];
             app.Pressure2_GraphEnable.Value = true;
 
             % Create Pressure1_GraphEnable
             app.Pressure1_GraphEnable = uicheckbox(app.PressureMonitoringControlPanel);
+            app.Pressure1_GraphEnable.Enable = 'off';
             app.Pressure1_GraphEnable.Text = '';
             app.Pressure1_GraphEnable.Position = [260 79 25 22];
             app.Pressure1_GraphEnable.Value = true;
 
             % Create Label_8
             app.Label_8 = uilabel(app.PressureMonitoringControlPanel);
+            app.Label_8.Enable = 'off';
             app.Label_8.Position = [206 98 34 22];
 
             % Create Pressure1_LabelField
             app.Pressure1_LabelField = uieditfield(app.PressureMonitoringControlPanel, 'text');
             app.Pressure1_LabelField.ValueChangedFcn = createCallbackFcn(app, @Pressure1_LabelFieldValueChanged, true);
+            app.Pressure1_LabelField.Enable = 'off';
             app.Pressure1_LabelField.Position = [194 76 55 22];
             app.Pressure1_LabelField.Value = '1';
 
             % Create Pressure2_LabelField
             app.Pressure2_LabelField = uieditfield(app.PressureMonitoringControlPanel, 'text');
             app.Pressure2_LabelField.ValueChangedFcn = createCallbackFcn(app, @Pressure2_LabelFieldValueChanged, true);
+            app.Pressure2_LabelField.Enable = 'off';
             app.Pressure2_LabelField.Position = [194 46 55 22];
             app.Pressure2_LabelField.Value = '2';
 
             % Create Pressure3_LabelField
             app.Pressure3_LabelField = uieditfield(app.PressureMonitoringControlPanel, 'text');
             app.Pressure3_LabelField.ValueChangedFcn = createCallbackFcn(app, @Pressure3_LabelFieldValueChanged, true);
+            app.Pressure3_LabelField.Enable = 'off';
             app.Pressure3_LabelField.Position = [194 15 55 22];
             app.Pressure3_LabelField.Value = '3';
 
             % Create FlowMonitoringControlPanel
             app.FlowMonitoringControlPanel = uipanel(app.MainTab);
             app.FlowMonitoringControlPanel.Title = 'Flow Monitoring & Control';
-            app.FlowMonitoringControlPanel.BackgroundColor = [0.7725 0.8314 0.7569];
+            app.FlowMonitoringControlPanel.BackgroundColor = [0.7686 0.8314 0.7608];
             app.FlowMonitoringControlPanel.FontWeight = 'bold';
-            app.FlowMonitoringControlPanel.Position = [15 206 298 116];
+            app.FlowMonitoringControlPanel.Position = [15 212 298 116];
 
             % Create Label_2
             app.Label_2 = uilabel(app.FlowMonitoringControlPanel);
@@ -1004,43 +1164,51 @@ classdef CCTA_exported < matlab.apps.AppBase
             % Create Flow1_SetPoint
             app.Flow1_SetPoint = uieditfield(app.FlowMonitoringControlPanel, 'numeric');
             app.Flow1_SetPoint.ValueChangedFcn = createCallbackFcn(app, @Flow1_SetPointValueChanged, true);
+            app.Flow1_SetPoint.Enable = 'off';
             app.Flow1_SetPoint.Position = [134 44 49 22];
 
             % Create Flow2_SetPoint
             app.Flow2_SetPoint = uieditfield(app.FlowMonitoringControlPanel, 'numeric');
             app.Flow2_SetPoint.ValueChangedFcn = createCallbackFcn(app, @Flow2_SetPointValueChanged, true);
+            app.Flow2_SetPoint.Enable = 'off';
             app.Flow2_SetPoint.Position = [134 13 49 22];
 
             % Create CurrentLabel_2
             app.CurrentLabel_2 = uilabel(app.FlowMonitoringControlPanel);
+            app.CurrentLabel_2.Enable = 'off';
             app.CurrentLabel_2.Position = [71 66 45 22];
             app.CurrentLabel_2.Text = 'Current';
 
-            % Create SetpointLabel_2
-            app.SetpointLabel_2 = uilabel(app.FlowMonitoringControlPanel);
-            app.SetpointLabel_2.Position = [134 66 49 22];
-            app.SetpointLabel_2.Text = 'Setpoint';
+            % Create TargetLabel_2
+            app.TargetLabel_2 = uilabel(app.FlowMonitoringControlPanel);
+            app.TargetLabel_2.Enable = 'off';
+            app.TargetLabel_2.Position = [140 66 38 22];
+            app.TargetLabel_2.Text = 'Target';
 
             % Create Label_3
             app.Label_3 = uilabel(app.FlowMonitoringControlPanel);
             app.Label_3.HorizontalAlignment = 'center';
+            app.Label_3.Enable = 'off';
             app.Label_3.Position = [17 45 25 22];
             app.Label_3.Text = '1';
 
             % Create Flow1_EditField_Current
             app.Flow1_EditField_Current = uieditfield(app.FlowMonitoringControlPanel, 'numeric');
             app.Flow1_EditField_Current.Editable = 'off';
+            app.Flow1_EditField_Current.Enable = 'off';
             app.Flow1_EditField_Current.Position = [67 44 53 22];
 
             % Create Label_4
             app.Label_4 = uilabel(app.FlowMonitoringControlPanel);
             app.Label_4.HorizontalAlignment = 'center';
+            app.Label_4.Enable = 'off';
             app.Label_4.Position = [17 13 25 22];
             app.Label_4.Text = '2';
 
             % Create Flow2_EditField_Current
             app.Flow2_EditField_Current = uieditfield(app.FlowMonitoringControlPanel, 'numeric');
             app.Flow2_EditField_Current.Editable = 'off';
+            app.Flow2_EditField_Current.Enable = 'off';
             app.Flow2_EditField_Current.Position = [67 13 53 22];
 
             % Create allvaluesinLminLabel
@@ -1051,163 +1219,108 @@ classdef CCTA_exported < matlab.apps.AppBase
 
             % Create Flow2_GraphEnable
             app.Flow2_GraphEnable = uicheckbox(app.FlowMonitoringControlPanel);
+            app.Flow2_GraphEnable.Enable = 'off';
             app.Flow2_GraphEnable.Text = '';
             app.Flow2_GraphEnable.Position = [258 13 25 22];
             app.Flow2_GraphEnable.Value = true;
 
             % Create Flow1_GraphEnable
             app.Flow1_GraphEnable = uicheckbox(app.FlowMonitoringControlPanel);
+            app.Flow1_GraphEnable.Enable = 'off';
             app.Flow1_GraphEnable.Text = '';
             app.Flow1_GraphEnable.Position = [258 45 25 22];
             app.Flow1_GraphEnable.Value = true;
 
             % Create GraphLabel_2
             app.GraphLabel_2 = uilabel(app.FlowMonitoringControlPanel);
+            app.GraphLabel_2.Enable = 'off';
             app.GraphLabel_2.Position = [248 66 45 22];
             app.GraphLabel_2.Text = 'Graph?';
 
             % Create SensorLabel_2
             app.SensorLabel_2 = uilabel(app.FlowMonitoringControlPanel);
             app.SensorLabel_2.FontWeight = 'bold';
+            app.SensorLabel_2.Enable = 'off';
             app.SensorLabel_2.Position = [7 66 45 22];
             app.SensorLabel_2.Text = 'Sensor';
 
             % Create Flow1_LabelField
             app.Flow1_LabelField = uieditfield(app.FlowMonitoringControlPanel, 'text');
             app.Flow1_LabelField.ValueChangedFcn = createCallbackFcn(app, @Flow1_LabelFieldValueChanged, true);
+            app.Flow1_LabelField.Enable = 'off';
             app.Flow1_LabelField.Position = [192 43 55 22];
             app.Flow1_LabelField.Value = '1';
 
             % Create Flow2_LabelField
             app.Flow2_LabelField = uieditfield(app.FlowMonitoringControlPanel, 'text');
             app.Flow2_LabelField.ValueChangedFcn = createCallbackFcn(app, @Flow2_LabelFieldValueChanged, true);
+            app.Flow2_LabelField.Enable = 'off';
             app.Flow2_LabelField.Position = [192 13 55 22];
             app.Flow2_LabelField.Value = '2';
 
             % Create Label_9
             app.Label_9 = uilabel(app.FlowMonitoringControlPanel);
+            app.Label_9.Enable = 'off';
             app.Label_9.Position = [202 66 34 22];
 
-            % Create Panel
-            app.Panel = uipanel(app.MainTab);
-            app.Panel.BorderColor = [0.651 0.651 0.651];
-            app.Panel.BorderWidth = 0;
-            app.Panel.BackgroundColor = [0.8392 0.8275 0.8588];
-            app.Panel.FontAngle = 'italic';
-            app.Panel.Position = [332 154 435 333];
+            % Create PressureGraphPanel
+            app.PressureGraphPanel = uipanel(app.MainTab);
+            app.PressureGraphPanel.BorderColor = [0.651 0.651 0.651];
+            app.PressureGraphPanel.BorderWidth = 0;
+            app.PressureGraphPanel.BackgroundColor = [0.8392 0.8314 0.8588];
+            app.PressureGraphPanel.FontAngle = 'italic';
+            app.PressureGraphPanel.Position = [332 160 435 333];
 
             % Create PressureAxes
-            app.PressureAxes = uiaxes(app.Panel);
+            app.PressureAxes = uiaxes(app.PressureGraphPanel);
             title(app.PressureAxes, 'Pressure Data')
             xlabel(app.PressureAxes, 'Time (s)')
             ylabel(app.PressureAxes, 'Pressure (mmHg)')
             zlabel(app.PressureAxes, 'Z')
+            app.PressureAxes.Toolbar.Visible = 'off';
             app.PressureAxes.FontWeight = 'bold';
+            app.PressureAxes.XColor = [0.502 0.502 0.502];
+            app.PressureAxes.YColor = [0.502 0.502 0.502];
+            app.PressureAxes.Color = [0.902 0.902 0.902];
             app.PressureAxes.FontSize = 14;
             app.PressureAxes.Position = [12 9 409 312];
 
-            % Create HoldGraphsButton
-            app.HoldGraphsButton = uibutton(app.MainTab, 'state');
-            app.HoldGraphsButton.Text = 'Hold Graphs';
-            app.HoldGraphsButton.BackgroundColor = [0.1569 0.5725 0.8431];
-            app.HoldGraphsButton.FontSize = 14;
-            app.HoldGraphsButton.FontWeight = 'bold';
-            app.HoldGraphsButton.FontColor = [1 1 1];
-            app.HoldGraphsButton.Position = [791 40 126 31];
-
-            % Create ConnectButton
-            app.ConnectButton = uibutton(app.MainTab, 'push');
-            app.ConnectButton.ButtonPushedFcn = createCallbackFcn(app, @ConnectButtonPushed, true);
-            app.ConnectButton.BackgroundColor = [0.0824 0.1961 0.2627];
-            app.ConnectButton.FontSize = 14;
-            app.ConnectButton.FontWeight = 'bold';
-            app.ConnectButton.FontColor = [1 1 1];
-            app.ConnectButton.Position = [929 79 126 31];
-            app.ConnectButton.Text = 'Connect';
-
-            % Create ClearDataButton
-            app.ClearDataButton = uibutton(app.MainTab, 'push');
-            app.ClearDataButton.ButtonPushedFcn = createCallbackFcn(app, @ClearDataButtonPushed, true);
-            app.ClearDataButton.BackgroundColor = [0.1569 0.5725 0.8431];
-            app.ClearDataButton.FontSize = 14;
-            app.ClearDataButton.FontWeight = 'bold';
-            app.ClearDataButton.FontColor = [1 1 1];
-            app.ClearDataButton.Position = [653 40 126 31];
-            app.ClearDataButton.Text = 'Clear Data';
-
-            % Create ExportDataButton
-            app.ExportDataButton = uibutton(app.MainTab, 'push');
-            app.ExportDataButton.ButtonPushedFcn = createCallbackFcn(app, @ExportDataButtonPushed, true);
-            app.ExportDataButton.BackgroundColor = [0.1569 0.5725 0.8431];
-            app.ExportDataButton.FontSize = 14;
-            app.ExportDataButton.FontWeight = 'bold';
-            app.ExportDataButton.FontColor = [1 1 1];
-            app.ExportDataButton.Position = [929 40 126 31];
-            app.ExportDataButton.Text = 'Export Data';
-
-            % Create RefreshListButton
-            app.RefreshListButton = uibutton(app.MainTab, 'push');
-            app.RefreshListButton.ButtonPushedFcn = createCallbackFcn(app, @RefreshListButtonPushed, true);
-            app.RefreshListButton.BackgroundColor = [0.0824 0.1961 0.2627];
-            app.RefreshListButton.FontSize = 14;
-            app.RefreshListButton.FontWeight = 'bold';
-            app.RefreshListButton.FontColor = [1 1 1];
-            app.RefreshListButton.Position = [791 79 126 31];
-            app.RefreshListButton.Text = 'Refresh List';
-
-            % Create GraphOptionsLabel
-            app.GraphOptionsLabel = uilabel(app.MainTab);
-            app.GraphOptionsLabel.FontSize = 18;
-            app.GraphOptionsLabel.FontWeight = 'bold';
-            app.GraphOptionsLabel.FontColor = [0.1569 0.5725 0.8431];
-            app.GraphOptionsLabel.Position = [505 43 131 28];
-            app.GraphOptionsLabel.Text = 'Graph Options';
-
-            % Create COMPortLabel
-            app.COMPortLabel = uilabel(app.MainTab);
-            app.COMPortLabel.HorizontalAlignment = 'right';
-            app.COMPortLabel.FontSize = 18;
-            app.COMPortLabel.FontWeight = 'bold';
-            app.COMPortLabel.FontColor = [0.0824 0.1961 0.2627];
-            app.COMPortLabel.Position = [541 82 93 23];
-            app.COMPortLabel.Text = 'COM Port ';
-
-            % Create COMPortDropDown
-            app.COMPortDropDown = uidropdown(app.MainTab);
-            app.COMPortDropDown.FontSize = 14;
-            app.COMPortDropDown.FontWeight = 'bold';
-            app.COMPortDropDown.FontColor = [1 1 1];
-            app.COMPortDropDown.BackgroundColor = [0.0824 0.1961 0.2627];
-            app.COMPortDropDown.Position = [653 79 126 31];
-
-            % Create ConnectedLamp
-            app.ConnectedLamp = uilamp(app.MainTab);
-            app.ConnectedLamp.Position = [1064 84 20 20];
-            app.ConnectedLamp.Color = [0.8 0.8 0.8];
+            % Create PressureAxesWaitingForConnectionLabel
+            app.PressureAxesWaitingForConnectionLabel = uilabel(app.PressureGraphPanel);
+            app.PressureAxesWaitingForConnectionLabel.HorizontalAlignment = 'center';
+            app.PressureAxesWaitingForConnectionLabel.FontSize = 36;
+            app.PressureAxesWaitingForConnectionLabel.FontWeight = 'bold';
+            app.PressureAxesWaitingForConnectionLabel.FontColor = [0.149 0.149 0.149];
+            app.PressureAxesWaitingForConnectionLabel.Enable = 'off';
+            app.PressureAxesWaitingForConnectionLabel.Position = [103 145 258 47];
+            app.PressureAxesWaitingForConnectionLabel.Text = 'No connection';
 
             % Create PumpControlPanel
             app.PumpControlPanel = uipanel(app.MainTab);
             app.PumpControlPanel.Title = 'Pump Control';
             app.PumpControlPanel.BackgroundColor = [0.902 0.902 0.902];
             app.PumpControlPanel.FontWeight = 'bold';
-            app.PumpControlPanel.Position = [15 70 298 124];
+            app.PumpControlPanel.Position = [15 76 298 124];
 
             % Create PumpPowerSliderLabel
             app.PumpPowerSliderLabel = uilabel(app.PumpControlPanel);
             app.PumpPowerSliderLabel.HorizontalAlignment = 'right';
             app.PumpPowerSliderLabel.FontWeight = 'bold';
+            app.PumpPowerSliderLabel.Enable = 'off';
             app.PumpPowerSliderLabel.Position = [10 39 95 22];
             app.PumpPowerSliderLabel.Text = 'Pump Power  %';
 
             % Create PumpPowerSlider
             app.PumpPowerSlider = uislider(app.PumpControlPanel);
             app.PumpPowerSlider.ValueChangedFcn = createCallbackFcn(app, @PumpPowerSliderValueChanged, true);
+            app.PumpPowerSlider.Enable = 'off';
             app.PumpPowerSlider.Position = [126 48 150 3];
 
             % Create ControlModeSwitchLabel
             app.ControlModeSwitchLabel = uilabel(app.PumpControlPanel);
             app.ControlModeSwitchLabel.HorizontalAlignment = 'center';
             app.ControlModeSwitchLabel.FontWeight = 'bold';
+            app.ControlModeSwitchLabel.Enable = 'off';
             app.ControlModeSwitchLabel.Position = [12 70 82 22];
             app.ControlModeSwitchLabel.Text = 'Control Mode';
 
@@ -1220,21 +1333,134 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.ControlModeSwitch.Position = [189 71 45 20];
             app.ControlModeSwitch.Value = 'Manual';
 
-            % Create Panel_4
-            app.Panel_4 = uipanel(app.MainTab);
-            app.Panel_4.BorderWidth = 0;
-            app.Panel_4.BackgroundColor = [0.7725 0.8314 0.7569];
-            app.Panel_4.Position = [767 154 447 333];
+            % Create FlowGraphPanel
+            app.FlowGraphPanel = uipanel(app.MainTab);
+            app.FlowGraphPanel.BorderWidth = 0;
+            app.FlowGraphPanel.BackgroundColor = [0.7725 0.8314 0.7569];
+            app.FlowGraphPanel.Position = [767 160 447 333];
 
             % Create FlowAxes
-            app.FlowAxes = uiaxes(app.Panel_4);
+            app.FlowAxes = uiaxes(app.FlowGraphPanel);
             title(app.FlowAxes, 'Flow Data')
             xlabel(app.FlowAxes, 'Time(s)')
             ylabel(app.FlowAxes, 'Flow (L/min)')
             zlabel(app.FlowAxes, 'Z')
+            app.FlowAxes.Toolbar.Visible = 'off';
             app.FlowAxes.FontWeight = 'bold';
+            app.FlowAxes.XColor = [0.502 0.502 0.502];
+            app.FlowAxes.YColor = [0.502 0.502 0.502];
+            app.FlowAxes.Color = [0.902 0.902 0.902];
+            app.FlowAxes.GridColor = [0.149 0.149 0.149];
             app.FlowAxes.FontSize = 14;
             app.FlowAxes.Position = [13 11 419 310];
+
+            % Create FlowAxesWaitingForConnectionLabel
+            app.FlowAxesWaitingForConnectionLabel = uilabel(app.FlowGraphPanel);
+            app.FlowAxesWaitingForConnectionLabel.HorizontalAlignment = 'center';
+            app.FlowAxesWaitingForConnectionLabel.FontSize = 36;
+            app.FlowAxesWaitingForConnectionLabel.FontWeight = 'bold';
+            app.FlowAxesWaitingForConnectionLabel.FontColor = [0.149 0.149 0.149];
+            app.FlowAxesWaitingForConnectionLabel.Enable = 'off';
+            app.FlowAxesWaitingForConnectionLabel.Position = [114 146 258 47];
+            app.FlowAxesWaitingForConnectionLabel.Text = 'No connection';
+
+            % Create Panel_5
+            app.Panel_5 = uipanel(app.MainTab);
+            app.Panel_5.BorderWidth = 0;
+            app.Panel_5.BackgroundColor = [0.9412 0.9412 0.9412];
+            app.Panel_5.Position = [331 78 883 61];
+
+            % Create ConnectButton
+            app.ConnectButton = uibutton(app.Panel_5, 'push');
+            app.ConnectButton.ButtonPushedFcn = createCallbackFcn(app, @ConnectButtonPushed, true);
+            app.ConnectButton.BackgroundColor = [1 0 0];
+            app.ConnectButton.FontSize = 14;
+            app.ConnectButton.FontWeight = 'bold';
+            app.ConnectButton.FontColor = [0.149 0.149 0.149];
+            app.ConnectButton.Position = [602 16 126 31];
+            app.ConnectButton.Text = 'Connect';
+
+            % Create Button
+            app.Button = uibutton(app.Panel_5, 'push');
+            app.Button.ButtonPushedFcn = createCallbackFcn(app, @ButtonPushed, true);
+            app.Button.Icon = fullfile(pathToMLAPP, 'images', 'Refresh_icon.png');
+            app.Button.BackgroundColor = [0.9412 0.9412 0.9412];
+            app.Button.FontSize = 14;
+            app.Button.FontWeight = 'bold';
+            app.Button.FontColor = [0.149 0.149 0.149];
+            app.Button.Position = [460 16 31 32];
+            app.Button.Text = '';
+
+            % Create ConnectedLamp
+            app.ConnectedLamp = uilamp(app.Panel_5);
+            app.ConnectedLamp.Position = [501 21 20 20];
+            app.ConnectedLamp.Color = [1 0 0];
+
+            % Create COMPortLabel
+            app.COMPortLabel = uilabel(app.Panel_5);
+            app.COMPortLabel.HorizontalAlignment = 'right';
+            app.COMPortLabel.FontSize = 18;
+            app.COMPortLabel.FontWeight = 'bold';
+            app.COMPortLabel.FontColor = [0.149 0.149 0.149];
+            app.COMPortLabel.Position = [203 19 104 23];
+            app.COMPortLabel.Text = 'Connection';
+
+            % Create ConnectionDropDown
+            app.ConnectionDropDown = uidropdown(app.Panel_5);
+            app.ConnectionDropDown.FontSize = 14;
+            app.ConnectionDropDown.FontWeight = 'bold';
+            app.ConnectionDropDown.FontColor = [0.149 0.149 0.149];
+            app.ConnectionDropDown.BackgroundColor = [0.9412 0.9412 0.9412];
+            app.ConnectionDropDown.Position = [326 16 126 31];
+
+            % Create GraphOptionsPanel
+            app.GraphOptionsPanel = uipanel(app.MainTab);
+            app.GraphOptionsPanel.BorderWidth = 0;
+            app.GraphOptionsPanel.Position = [332 23 883 56];
+
+            % Create PauseGraphsButton
+            app.PauseGraphsButton = uibutton(app.GraphOptionsPanel, 'state');
+            app.PauseGraphsButton.Enable = 'off';
+            app.PauseGraphsButton.Icon = fullfile(pathToMLAPP, 'images', 'pause_icon.png');
+            app.PauseGraphsButton.Text = 'Pause Graphs';
+            app.PauseGraphsButton.BackgroundColor = [0.1569 0.5725 0.8431];
+            app.PauseGraphsButton.FontSize = 14;
+            app.PauseGraphsButton.FontWeight = 'bold';
+            app.PauseGraphsButton.FontColor = [1 1 1];
+            app.PauseGraphsButton.Position = [459 15 136 31];
+
+            % Create ClearDataButton
+            app.ClearDataButton = uibutton(app.GraphOptionsPanel, 'push');
+            app.ClearDataButton.ButtonPushedFcn = createCallbackFcn(app, @ClearDataButtonPushed, true);
+            app.ClearDataButton.Icon = fullfile(pathToMLAPP, 'images', 'eraser_white.png');
+            app.ClearDataButton.BackgroundColor = [0.1569 0.5725 0.8431];
+            app.ClearDataButton.FontSize = 14;
+            app.ClearDataButton.FontWeight = 'bold';
+            app.ClearDataButton.FontColor = [1 1 1];
+            app.ClearDataButton.Enable = 'off';
+            app.ClearDataButton.Position = [326 13 126 31];
+            app.ClearDataButton.Text = 'Clear Data';
+
+            % Create ExportDataButton
+            app.ExportDataButton = uibutton(app.GraphOptionsPanel, 'push');
+            app.ExportDataButton.ButtonPushedFcn = createCallbackFcn(app, @ExportDataButtonPushed, true);
+            app.ExportDataButton.Icon = fullfile(pathToMLAPP, 'images', 'export.png');
+            app.ExportDataButton.BackgroundColor = [0.1569 0.5725 0.8431];
+            app.ExportDataButton.FontSize = 14;
+            app.ExportDataButton.FontWeight = 'bold';
+            app.ExportDataButton.FontColor = [1 1 1];
+            app.ExportDataButton.Enable = 'off';
+            app.ExportDataButton.Position = [601 15 126 31];
+            app.ExportDataButton.Text = 'Export Data';
+
+            % Create GraphOptionsLabel
+            app.GraphOptionsLabel = uilabel(app.GraphOptionsPanel);
+            app.GraphOptionsLabel.FontSize = 18;
+            app.GraphOptionsLabel.FontWeight = 'bold';
+            app.GraphOptionsLabel.FontColor = [0.1608 0.5686 0.8392];
+            app.GraphOptionsLabel.Enable = 'off';
+            app.GraphOptionsLabel.Position = [178 16 131 28];
+            app.GraphOptionsLabel.Text = 'Graph Options';
 
             % Create SettingsOtherInfoTab
             app.SettingsOtherInfoTab = uitab(app.TabGroup2);
@@ -1243,12 +1469,12 @@ classdef CCTA_exported < matlab.apps.AppBase
             % Create SimulateDataCheckBox
             app.SimulateDataCheckBox = uicheckbox(app.SettingsOtherInfoTab);
             app.SimulateDataCheckBox.Text = 'Simulate Data?';
-            app.SimulateDataCheckBox.Position = [180 253 104 22];
+            app.SimulateDataCheckBox.Position = [180 259 104 22];
 
             % Create PressureValveControlNotAvailablePanel
             app.PressureValveControlNotAvailablePanel = uipanel(app.SettingsOtherInfoTab);
             app.PressureValveControlNotAvailablePanel.Title = 'Pressure Valve Control (Not Available)';
-            app.PressureValveControlNotAvailablePanel.Position = [24 342 260 141];
+            app.PressureValveControlNotAvailablePanel.Position = [24 348 260 141];
 
             % Create MotorStepNumberEditFieldLabel
             app.MotorStepNumberEditFieldLabel = uilabel(app.PressureValveControlNotAvailablePanel);
@@ -1282,7 +1508,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.PumpAnalogWriteValue0255Label = uilabel(app.SettingsOtherInfoTab);
             app.PumpAnalogWriteValue0255Label.HorizontalAlignment = 'right';
             app.PumpAnalogWriteValue0255Label.FontWeight = 'bold';
-            app.PumpAnalogWriteValue0255Label.Position = [50 290 153 30];
+            app.PumpAnalogWriteValue0255Label.Position = [50 296 153 30];
             app.PumpAnalogWriteValue0255Label.Text = {'Pump Analog Write Value '; '(0-255)'};
 
             % Create PumpAnalogWriteValue0255EditField
@@ -1290,97 +1516,105 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.PumpAnalogWriteValue0255EditField.Limits = [0 255];
             app.PumpAnalogWriteValue0255EditField.RoundFractionalValues = 'on';
             app.PumpAnalogWriteValue0255EditField.ValueChangedFcn = createCallbackFcn(app, @PumpAnalogWriteValue0255EditFieldValueChanged, true);
-            app.PumpAnalogWriteValue0255EditField.Position = [218 298 66 22];
+            app.PumpAnalogWriteValue0255EditField.Editable = 'off';
+            app.PumpAnalogWriteValue0255EditField.Position = [218 304 66 22];
 
             % Create PIDCoefficientsPanel
             app.PIDCoefficientsPanel = uipanel(app.SettingsOtherInfoTab);
             app.PIDCoefficientsPanel.Title = 'PID Coefficients';
-            app.PIDCoefficientsPanel.Position = [299 342 469 139];
+            app.PIDCoefficientsPanel.Position = [299 348 469 139];
 
-            % Create Panel_2
-            app.Panel_2 = uipanel(app.SettingsOtherInfoTab);
-            app.Panel_2.BackgroundColor = [0.8392 0.8275 0.8588];
-            app.Panel_2.Position = [311 408 446 42];
+            % Create PressureCoefficientsPanel
+            app.PressureCoefficientsPanel = uipanel(app.SettingsOtherInfoTab);
+            app.PressureCoefficientsPanel.BackgroundColor = [0.8392 0.8275 0.8588];
+            app.PressureCoefficientsPanel.Position = [311 414 446 42];
 
             % Create PressureControlLabel
-            app.PressureControlLabel = uilabel(app.Panel_2);
+            app.PressureControlLabel = uilabel(app.PressureCoefficientsPanel);
             app.PressureControlLabel.FontWeight = 'bold';
             app.PressureControlLabel.Position = [12 10 102 22];
             app.PressureControlLabel.Text = 'Pressure Control';
 
             % Create KpEditField_2Label
-            app.KpEditField_2Label = uilabel(app.Panel_2);
+            app.KpEditField_2Label = uilabel(app.PressureCoefficientsPanel);
             app.KpEditField_2Label.HorizontalAlignment = 'right';
             app.KpEditField_2Label.Position = [135 10 25 22];
             app.KpEditField_2Label.Text = 'Kp';
 
             % Create KpPressureEditField
-            app.KpPressureEditField = uieditfield(app.Panel_2, 'numeric');
+            app.KpPressureEditField = uieditfield(app.PressureCoefficientsPanel, 'numeric');
             app.KpPressureEditField.ValueChangedFcn = createCallbackFcn(app, @KpPressureEditFieldValueChanged, true);
+            app.KpPressureEditField.Enable = 'off';
             app.KpPressureEditField.Position = [175 10 42 22];
 
             % Create KiEditField_2Label
-            app.KiEditField_2Label = uilabel(app.Panel_2);
+            app.KiEditField_2Label = uilabel(app.PressureCoefficientsPanel);
             app.KiEditField_2Label.HorizontalAlignment = 'right';
             app.KiEditField_2Label.Position = [240 10 25 22];
             app.KiEditField_2Label.Text = 'Ki';
 
             % Create KiPressureEditField
-            app.KiPressureEditField = uieditfield(app.Panel_2, 'numeric');
+            app.KiPressureEditField = uieditfield(app.PressureCoefficientsPanel, 'numeric');
             app.KiPressureEditField.ValueChangedFcn = createCallbackFcn(app, @KiPressureEditFieldValueChanged, true);
+            app.KiPressureEditField.Enable = 'off';
             app.KiPressureEditField.Position = [280 10 42 22];
 
             % Create KdPressureEditField
-            app.KdPressureEditField = uieditfield(app.Panel_2, 'numeric');
+            app.KdPressureEditField = uieditfield(app.PressureCoefficientsPanel, 'numeric');
             app.KdPressureEditField.ValueChangedFcn = createCallbackFcn(app, @KdPressureEditFieldValueChanged, true);
+            app.KdPressureEditField.Enable = 'off';
             app.KdPressureEditField.Position = [386 10 42 22];
 
             % Create KdEditField_2Label
-            app.KdEditField_2Label = uilabel(app.Panel_2);
+            app.KdEditField_2Label = uilabel(app.PressureCoefficientsPanel);
             app.KdEditField_2Label.HorizontalAlignment = 'right';
             app.KdEditField_2Label.Position = [346 10 25 22];
             app.KdEditField_2Label.Text = 'Kd';
 
-            % Create Panel_3
-            app.Panel_3 = uipanel(app.SettingsOtherInfoTab);
-            app.Panel_3.BackgroundColor = [0.7725 0.8314 0.7569];
-            app.Panel_3.Position = [311 355 446 42];
+            % Create FlowCoefficientsPanel
+            app.FlowCoefficientsPanel = uipanel(app.SettingsOtherInfoTab);
+            app.FlowCoefficientsPanel.BackgroundColor = [0.7725 0.8314 0.7569];
+            app.FlowCoefficientsPanel.Position = [311 361 446 42];
 
             % Create FlowControlLabel
-            app.FlowControlLabel = uilabel(app.Panel_3);
+            app.FlowControlLabel = uilabel(app.FlowCoefficientsPanel);
             app.FlowControlLabel.FontWeight = 'bold';
             app.FlowControlLabel.Position = [36 10 78 22];
             app.FlowControlLabel.Text = 'Flow Control';
 
             % Create KpEditFieldLabel
-            app.KpEditFieldLabel = uilabel(app.Panel_3);
+            app.KpEditFieldLabel = uilabel(app.FlowCoefficientsPanel);
             app.KpEditFieldLabel.HorizontalAlignment = 'right';
+            app.KpEditFieldLabel.Enable = 'off';
             app.KpEditFieldLabel.Position = [135 10 25 22];
             app.KpEditFieldLabel.Text = 'Kp';
 
             % Create KpFlowEditField
-            app.KpFlowEditField = uieditfield(app.Panel_3, 'numeric');
+            app.KpFlowEditField = uieditfield(app.FlowCoefficientsPanel, 'numeric');
             app.KpFlowEditField.ValueChangedFcn = createCallbackFcn(app, @KpFlowEditFieldValueChanged, true);
+            app.KpFlowEditField.Enable = 'off';
             app.KpFlowEditField.Position = [175 10 42 22];
 
             % Create KiEditFieldLabel
-            app.KiEditFieldLabel = uilabel(app.Panel_3);
+            app.KiEditFieldLabel = uilabel(app.FlowCoefficientsPanel);
             app.KiEditFieldLabel.HorizontalAlignment = 'right';
             app.KiEditFieldLabel.Position = [240 10 25 22];
             app.KiEditFieldLabel.Text = 'Ki';
 
             % Create KiFlowEditField
-            app.KiFlowEditField = uieditfield(app.Panel_3, 'numeric');
+            app.KiFlowEditField = uieditfield(app.FlowCoefficientsPanel, 'numeric');
             app.KiFlowEditField.ValueChangedFcn = createCallbackFcn(app, @KiFlowEditFieldValueChanged, true);
+            app.KiFlowEditField.Enable = 'off';
             app.KiFlowEditField.Position = [280 10 42 22];
 
             % Create KdFlowEditField
-            app.KdFlowEditField = uieditfield(app.Panel_3, 'numeric');
+            app.KdFlowEditField = uieditfield(app.FlowCoefficientsPanel, 'numeric');
             app.KdFlowEditField.ValueChangedFcn = createCallbackFcn(app, @KdFlowEditFieldValueChanged, true);
+            app.KdFlowEditField.Enable = 'off';
             app.KdFlowEditField.Position = [386 10 42 22];
 
             % Create KdEditFieldLabel
-            app.KdEditFieldLabel = uilabel(app.Panel_3);
+            app.KdEditFieldLabel = uilabel(app.FlowCoefficientsPanel);
             app.KdEditFieldLabel.HorizontalAlignment = 'right';
             app.KdEditFieldLabel.Position = [346 10 25 22];
             app.KdEditFieldLabel.Text = 'Kd';
@@ -1396,14 +1630,26 @@ classdef CCTA_exported < matlab.apps.AppBase
         % Construct app
         function app = CCTA_exported
 
-            % Create UIFigure and components
-            createComponents(app)
+            runningApp = getRunningApp(app);
 
-            % Register the app with App Designer
-            registerApp(app, app.UIFigure)
+            % Check for running singleton app
+            if isempty(runningApp)
 
-            % Execute the startup function
-            runStartupFcn(app, @startupFcn)
+                % Create UIFigure and components
+                createComponents(app)
+
+                % Register the app with App Designer
+                registerApp(app, app.UIFigure)
+
+                % Execute the startup function
+                runStartupFcn(app, @startupFcn)
+            else
+
+                % Focus the running singleton app
+                figure(runningApp.UIFigure)
+
+                app = runningApp;
+            end
 
             if nargout == 0
                 clear app
