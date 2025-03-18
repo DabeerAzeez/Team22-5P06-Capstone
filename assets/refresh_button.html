@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        .refresh-button {
+            width: 60px;
+            height: 50px; /* Changed height to match width (square) */
+            border: 1px solid #7d7d7d; /* Black outline */
+            background: #f0f0f0; /* Rounded corners with this background color */
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px; /* Rounded corners */
+        }
+
+        .refresh-icon {
+            width: 100%;
+            height: 100%;
+            transition: transform 0.5s ease-in-out;
+        }
+
+        .rotating {
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(-360deg); }
+        }
+    </style>
+</head>
+<body>
+    <button id="refreshBtn" class="refresh-button">
+        <img id="refreshIcon" class="refresh-icon" src="Refresh_icon.png" alt="Refresh">
+    </button>
+
+    <script>
+        let refreshBtn = document.getElementById("refreshBtn");
+        let refreshIcon = document.getElementById("refreshIcon");
+
+        // Handle button click
+        refreshBtn.addEventListener("click", function() {
+            refreshIcon.classList.add("rotating");
+            // Send event to MATLAB
+            if (window.MATLAB) {
+                window.MATLAB.sendData("start");
+            }
+        });
+
+        // Listen for MATLAB response
+        if (window.MATLAB) {
+            window.MATLAB.onDataReceived = function(data) {
+                if (data === "stop") {
+                    refreshIcon.classList.remove("rotating");
+                }
+            };
+        }
+    </script>
+</body>
+</html>
