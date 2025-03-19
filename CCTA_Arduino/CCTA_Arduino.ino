@@ -32,7 +32,7 @@ const int STEPS_PER_REV = 200;   // assuming # of microsteps is 1
 const int MAX_ROTATIONS = 7;     // of needle valve
 const int MAX_STEPS = STEPS_PER_REV * MAX_ROTATIONS;
 
-const bool SIMULATE_VALUES = true;        // whether simulated values should be sent over serial (for testing without setup)
+const bool SIMULATE_VALUES = false;        // whether simulated values should be sent over serial (for testing without setup)
 const bool SIMULATE_OSCILLATIONS = true;  // whether simulated values should oscillate sinusoidally over time
 
 // Variables
