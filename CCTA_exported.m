@@ -5,7 +5,7 @@ classdef CCTA_exported < matlab.apps.AppBase
         UIFigure                        matlab.ui.Figure
         TabGroup2                       matlab.ui.container.TabGroup
         MainTab                         matlab.ui.container.Tab
-        GraphOptionsPanel               matlab.ui.container.Panel
+        ButtonsPanel                    matlab.ui.container.Panel
         CalibrateButton                 matlab.ui.control.Button
         ExportDataButton                matlab.ui.control.Button
         ClearDataButton                 matlab.ui.control.Button
@@ -15,12 +15,12 @@ classdef CCTA_exported < matlab.apps.AppBase
         ConnectionDropDownLabel         matlab.ui.control.Label
         ConnectedLamp                   matlab.ui.control.Lamp
         RefreshConnectionsButton        matlab.ui.control.Button
-        ConnectButton                   matlab.ui.control.Button
+        ConnectDisconnectButton         matlab.ui.control.Button
         FlowGraphPanel                  matlab.ui.container.Panel
         FlowAxesWaitingForConnectionLabel  matlab.ui.control.Label
         FlowAxes                        matlab.ui.control.UIAxes
         PumpControlPanel                matlab.ui.container.Panel
-        StartPulsatileFlowWIPButton     matlab.ui.control.StateButton
+        StartPulsatileFlowButton        matlab.ui.control.StateButton
         ControlModeSwitch               matlab.ui.control.Switch
         ControlModeSwitchLabel          matlab.ui.control.Label
         PumpPowerSlider                 matlab.ui.control.Slider
@@ -72,6 +72,11 @@ classdef CCTA_exported < matlab.apps.AppBase
         Pressure1_SetPoint              matlab.ui.control.NumericEditField
         Label                           matlab.ui.control.Label
         SettingsTab                     matlab.ui.container.Tab
+        OtherSettingsPanel              matlab.ui.container.Panel
+        CalibrationdurationsEditField   matlab.ui.control.NumericEditField
+        CalibrationdurationsEditFieldLabel  matlab.ui.control.Label
+        CurrentPumpAnalogWriteValueEditField  matlab.ui.control.NumericEditField
+        CurrentPumpAnalogWriteValue0255EditFieldLabel  matlab.ui.control.Label
         DeveloperOptionsPanel           matlab.ui.container.Panel
         SimulateDataCheckBox            matlab.ui.control.CheckBox
         PIDCoefficientsPanel            matlab.ui.container.Panel
@@ -93,15 +98,6 @@ classdef CCTA_exported < matlab.apps.AppBase
         PressureControlLabel            matlab.ui.control.Label
         HelpTab                         matlab.ui.container.Tab
         HTML                            matlab.ui.control.HTML
-        ExtraTab                        matlab.ui.container.Tab
-        UITable                         matlab.ui.control.Table
-        PumpAnalogWriteValue0255EditField  matlab.ui.control.NumericEditField
-        PumpAnalogWriteValue0255EditFieldLabel  matlab.ui.control.Label
-        PressureValveControlNotAvailablePanel  matlab.ui.container.Panel
-        ClosedSlider                    matlab.ui.control.Slider
-        ClosedSliderLabel               matlab.ui.control.Label
-        MotorStepNumberEditField        matlab.ui.control.NumericEditField
-        MotorStepNumberEditFieldLabel   matlab.ui.control.Label
     end
 
     % TODO: Add "refresh ports" button
@@ -112,6 +108,7 @@ classdef CCTA_exported < matlab.apps.AppBase
         ARDUINO_ANALOGWRITE_MAX = 255;
         ARDUINO_SERIAL_BITRATE = 115200;
         PID_ERRORS_LENGTH = 100;  % # of error values to use for PID integral calculations
+        CALIBRATION_DURATION = 30;
 
         % Colors
         PRESSURE_COLOR = [0.84 0.83 0.86];
@@ -149,9 +146,6 @@ classdef CCTA_exported < matlab.apps.AppBase
         Kp_pressure = 2;  % PID coefficients when controlling pressure
         Ki_pressure = 0;
         Kd_pressure = 0;
-        
-        pressureMotorPosition = 0;
-        MAX_PRESSURE_MOTOR_POSITION = -200*7;  % 7 rotations, 200 steps per rotation; TODO: read in max stepper value from Arduino instead of hard-coding to 7 rotations
 
         lastFlowDutyCycle = 128;  % for comparisons
         flowDutyCycle = 128;  % Initialize halfway
@@ -416,8 +410,8 @@ classdef CCTA_exported < matlab.apps.AppBase
                 highlightSetPointUI(app, "None");
                 app.PumpPowerSlider.Enable = "on";
                 app.PID_setpoint_id = "None";
-            elseif lower(mode) == "auto"
-                app.PumpControlMode = "Auto";
+            elseif lower(mode) == "pid"
+                app.PumpControlMode = "PID";
                 app.ControlModeSwitch.Value = "Auto";
                 app.ControlModeSwitch.Enable = "on";
                 app.PumpPowerSlider.Enable = "off";
@@ -425,6 +419,11 @@ classdef CCTA_exported < matlab.apps.AppBase
                 app.PumpControlMode = "Pulsatile";
                 app.ControlModeSwitch.Value = "Auto";
                 app.ControlModeSwitch.Enable = "on";
+                app.PumpPowerSlider.Enable = "off";
+            elseif lower(mode) == "calibration"
+                app.PumpControlMode = "Calibration";
+                app.ControlModeSwitch.Value = "Auto";
+                app.ControlModeSwitch.Enable = "off";
                 app.PumpPowerSlider.Enable = "off";
             else
                 warning("Invalid control mode selected.");
@@ -451,7 +450,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             end
 
             % Update flow pump control UI
-            app.PumpAnalogWriteValue0255EditField.Value = app.flowDutyCycle;
+            app.CurrentPumpAnalogWriteValueEditField.Value = app.flowDutyCycle;
             app.PumpPowerSlider.Value = app.flowDutyCycle / app.ARDUINO_ANALOGWRITE_MAX * app.PumpPowerSlider.Limits(2);
 
             % Send command to Arduino
@@ -514,11 +513,11 @@ classdef CCTA_exported < matlab.apps.AppBase
             if isempty(ports)
                 uialert(app.UIFigure, "Try refreshing the connections list or check your device connection.", "No serial ports detected")
                 app.ConnectionDropDown.Enable = "off";
-                app.ConnectButton.Enable = "off";
+                app.ConnectDisconnectButton.Enable = "off";
                 return
             else
                 app.ConnectionDropDown.Enable = "on";  % in case it was disabled before
-                app.ConnectButton.Enable = "on";
+                app.ConnectDisconnectButton.Enable = "on";
             end
 
             % Read the "friendly names" of the COM Port devices using Powershell
@@ -548,18 +547,6 @@ classdef CCTA_exported < matlab.apps.AppBase
             % Update dropdown with formatted port names
             app.ConnectionDropDown.Items = portInfo;
             app.ConnectionDropDown.ItemsData = ports;  % To allow proper connections when using serialport() later off of the selected dropdown value
-        end
-        
-        function setValveControlPanelEnabled(app, value)
-            % Enable/disable all pressure valve control panel child objects
-            children = app.PressureValveControlNotAvailablePanel.Children;
-            for i = 1:numel(children)
-                if value == true
-                    children(i).Enable = 'on';
-                else
-                    children(i).Enable = 'off';
-                end
-            end
         end
         
         function highlightSetPointUI(app, setpointID)
@@ -660,7 +647,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             end
 
             % Other things
-            app.ConnectButton.BackgroundColor = app.COLOR_DISCONNECTED;
+            app.ConnectDisconnectButton.BackgroundColor = app.COLOR_DISCONNECTED;
 
             otherOptionsElements = [app.ClearDataButton, app.ExportDataButton, app.PauseGraphsButton];
 
@@ -683,16 +670,13 @@ classdef CCTA_exported < matlab.apps.AppBase
                 'Indeterminate', 'on');
 
             % Update UI
-            app.ConnectButton.Text = "Disconnect";
-            app.ConnectButton.BackgroundColor = app.BUTTON_COLOR_DEFAULT;
+            app.ConnectDisconnectButton.Text = "Disconnect";
+            app.ConnectDisconnectButton.BackgroundColor = app.BUTTON_COLOR_DEFAULT;
             app.ConnectedLamp.Color = app.COLOR_CONNECTED;
             app.setGUIEnabled(true);
 
             if app.SimulateDataCheckBox.Value == false
                 app.setUpArduinoConnection();
-                app.setValveControlPanelEnabled(true);
-            else
-                app.setValveControlPanelEnabled(false);
             end
 
             app.ConnectionDropDown.Enable = "off";
@@ -718,11 +702,10 @@ classdef CCTA_exported < matlab.apps.AppBase
                 'Indeterminate', 'on');
 
             app.arduinoObj = [];
-            app.setValveControlPanelEnabled(false);
             app.ConnectionDropDown.Enable = "on";
             app.RefreshConnectionsButton.Enable = "on";
-            app.ConnectButton.Text = "Connect";
-            app.ConnectButton.BackgroundColor = app.COLOR_DISCONNECTED;
+            app.ConnectDisconnectButton.Text = "Connect";
+            app.ConnectDisconnectButton.BackgroundColor = app.COLOR_DISCONNECTED;
             app.ConnectedLamp.Color = app.COLOR_DISCONNECTED;
             app.isConnected = false;
             app.setGUIEnabled(false);
@@ -738,7 +721,7 @@ classdef CCTA_exported < matlab.apps.AppBase
                 app.PumpControlPanel;
                 app.PumpPowerSlider;
                 app.PIDCoefficientsPanel;
-                app.GraphOptionsPanel.Children(:);
+                app.ButtonsPanel.Children(:);
                 ];
 
             % Convert logical state to 'on'/'off' string
@@ -798,6 +781,24 @@ classdef CCTA_exported < matlab.apps.AppBase
 
 
             pause(2);  % for smoother loading when enabling/disabling
+        end
+
+        function setGUIEnabledCalibration(app, state)
+            % Convert logical state to 'on'/'off' string
+            stateStr = ternary(state, 'on', 'off'); 
+
+            % Disable UI to prevent interference with calibration
+            uiElements = [app.PressureMonitoringControlmmHgPanel, ...
+                app.FlowMonitoringControlLminPanel, ...
+                app.ButtonsPanel.Children(:)', ...
+                app.PIDCoefficientsPanel, ...
+                app.ConnectDisconnectButton];
+
+            for uiElement = uiElements
+                if isprop(uiElement, 'Enable')
+                    uiElement.Enable = stateStr;
+                end
+            end
         end
         
         function updateDataPlots(app)
@@ -891,9 +892,8 @@ classdef CCTA_exported < matlab.apps.AppBase
         function continueSHOCalibration(app)
 
             % Run main loop for some time to collect values
-            duration = 10;  % # seconds to run calibration
             app.clearDataArrays();
-            app.runMainLoop(duration);
+            app.runMainLoop(app.CALIBRATION_DURATION);
 
             % Step 4: Calculate average pressures
             avg1 = mean(app.pressure_vals1);
@@ -904,9 +904,9 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.SHO_Pressure1 = avg1;
             app.Pressure1_EditField_SHO.Value = avg1;
             app.SHO_Pressure2 = avg2;
-            app.Pressure2_EditField_SHO.Value = avg1;
+            app.Pressure2_EditField_SHO.Value = avg2;
             app.SHO_Pressure3 = avg3;
-            app.Pressure3_EditField_SHO.Value = avg1;
+            app.Pressure3_EditField_SHO.Value = avg3;
 
             app.clearDataArrays();  % to avoid plots from randomly jumping down
 
@@ -914,7 +914,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.showCalibrationResults(avg1, avg2, avg3);
         end
 
-        function showCalibrationResults(~, avg1, avg2, avg3)
+        function showCalibrationResults(app, avg1, avg2, avg3)
             % Create custom dialog figure
             fig = uifigure('Name', 'Calibration Complete', 'Position', [500 500 450 300]);
 
@@ -936,6 +936,10 @@ classdef CCTA_exported < matlab.apps.AppBase
 
             % Optional: Add close button
             uibutton(fig, 'Text', 'Close', 'Position', [170 10 100 30], 'ButtonPushedFcn', @(btn, event) close(fig));
+
+            % Reset GUI back to normal use
+            app.setControlMode("Manual");
+            app.setGUIEnabledCalibration(true);
         end
     end
 
@@ -951,7 +955,6 @@ classdef CCTA_exported < matlab.apps.AppBase
             addpath(fullfile(app.appDir, 'helpers'));  % add helper functions to path
             app.PID_errors = zeros(1, app.PID_ERRORS_LENGTH);
             app.pulsatileFlowPeriod = app.pulsatileFlowTimes(end);
-            app.MotorStepNumberEditField.Limits = [app.MAX_PRESSURE_MOTOR_POSITION 0];
 
             % Update UI elements
             app.UIFigure.Name = 'Cardiac Catheterization Testing Apparatus (CCTA)';
@@ -963,12 +966,12 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.FlowAxes.Visible = "on";
         end
 
-        % Button pushed function: ConnectButton
-        function ConnectButtonPushed(app, event)
+        % Button pushed function: ConnectDisconnectButton
+        function ConnectDisconnectButtonPushed(app, event)
             
-            if app.ConnectButton.Text == "Connect"
+            if app.ConnectDisconnectButton.Text == "Connect"
                 app.connectGUI();
-            elseif app.ConnectButton.Text == "Disconnect"
+            elseif app.ConnectDisconnectButton.Text == "Disconnect"
                 app.disconnectGUI();
             else
                 uialert("Connect button container contains invalid text.")
@@ -1071,25 +1074,6 @@ classdef CCTA_exported < matlab.apps.AppBase
             close(dlg);
         end
 
-        % Value changed function: MotorStepNumberEditField
-        function MotorStepNumberEditFieldValueChanged(app, event)
-            value = app.MotorStepNumberEditField.Value;
-            app.ClosedSlider.Value = value/app.MAX_PRESSURE_MOTOR_POSITION * app.ClosedSlider.Limits(2);  % update slider
-
-            app.pressureMotorPosition = value;
-            app.sendControlValuesToArduino();
-        end
-
-        % Value changed function: ClosedSlider
-        function ClosedSliderValueChanged(app, event)
-            percent_closed = app.ClosedSlider.Value/app.ClosedSlider.Limits(2);  % negative because gear rotates valve the other way
-            app.pressureMotorPosition = round(app.MAX_PRESSURE_MOTOR_POSITION * percent_closed);
-
-            highlightSetPointUI(app, "None");
-            flushoutput(app.arduinoObj);  % in case this was done in the middle of sending another command
-            app.sendControlValuesToArduino();
-        end
-
         % Button pushed function: RefreshConnectionsButton
         function RefreshConnectionsButtonPushed(app, event)
             dlg = uiprogressdlg(app.UIFigure, ...
@@ -1102,9 +1086,9 @@ classdef CCTA_exported < matlab.apps.AppBase
             close(dlg);
         end
 
-        % Value changed function: PumpAnalogWriteValue0255EditField
-        function PumpAnalogWriteValue0255EditFieldValueChanged(app, event)
-            value = app.PumpAnalogWriteValue0255EditField.Value;
+        % Value changed function: CurrentPumpAnalogWriteValueEditField
+        function CurrentPumpAnalogWriteValueEditFieldValueChanged(app, event)
+            value = app.CurrentPumpAnalogWriteValueEditField.Value;
             app.flowDutyCycle = value;
             app.PumpPowerSlider.Value = value/app.ARDUINO_ANALOGWRITE_MAX * app.PumpPowerSlider.Limits(2);  % update slider
             app.setControlMode("Manual");
@@ -1139,7 +1123,7 @@ classdef CCTA_exported < matlab.apps.AppBase
         % Value changed function: Flow1_SetPoint
         function Flow1_SetPointValueChanged(app, event)
             app.PID_setpoint = app.Flow1_SetPoint.Value;
-            app.setControlMode("Auto");
+            app.setControlMode("PID");
             app.highlightSetPointUI("Flow1");
             app.PID_setpoint_id = "Flow1";
         end
@@ -1147,7 +1131,7 @@ classdef CCTA_exported < matlab.apps.AppBase
         % Value changed function: Flow2_SetPoint
         function Flow2_SetPointValueChanged(app, event)
             app.PID_setpoint = app.Flow2_SetPoint.Value;
-            app.setControlMode("Auto");
+            app.setControlMode("PID");
             app.highlightSetPointUI("Flow2");
             app.PID_setpoint_id = "Flow2";
         end
@@ -1155,7 +1139,7 @@ classdef CCTA_exported < matlab.apps.AppBase
         % Value changed function: Pressure1_SetPoint
         function Pressure1_SetPointValueChanged(app, event)
             app.PID_setpoint = app.Pressure1_SetPoint.Value;
-            app.setControlMode("Auto");
+            app.setControlMode("PID");
             app.highlightSetPointUI("Pressure1");
             app.PID_setpoint_id = "Pressure1";
         end
@@ -1163,7 +1147,7 @@ classdef CCTA_exported < matlab.apps.AppBase
         % Value changed function: Pressure2_SetPoint
         function Pressure2_SetPointValueChanged(app, event)
             app.PID_setpoint = app.Pressure2_SetPoint.Value;
-            app.setControlMode("Auto");
+            app.setControlMode("PID");
             app.highlightSetPointUI("Pressure2");
             app.PID_setpoint_id = "Pressure2";
         end
@@ -1171,7 +1155,7 @@ classdef CCTA_exported < matlab.apps.AppBase
         % Value changed function: Pressure3_SetPoint
         function Pressure3_SetPointValueChanged(app, event)
             app.PID_setpoint = app.Pressure3_SetPoint.Value;
-            app.setControlMode("Auto");
+            app.setControlMode("PID");
             app.highlightSetPointUI("Pressure3");
             app.PID_setpoint_id = "Pressure3";
         end
@@ -1215,7 +1199,7 @@ classdef CCTA_exported < matlab.apps.AppBase
         % Value changed function: PumpPowerSlider
         function PumpPowerSliderValueChanged(app, event)
             app.flowDutyCycle = round(app.PumpPowerSlider.Value/app.PumpPowerSlider.Limits(2)*app.ARDUINO_ANALOGWRITE_MAX);
-            app.PumpAnalogWriteValue0255EditField.Value = app.flowDutyCycle;
+            app.CurrentPumpAnalogWriteValueEditField.Value = app.flowDutyCycle;
             app.setControlMode("Manual");
 
             if ~isempty(app.arduinoObj)
@@ -1241,15 +1225,15 @@ classdef CCTA_exported < matlab.apps.AppBase
             value = app.SimulateDataCheckBox.Value;
 
             if value
-                app.ConnectButton.Enable = "on";
+                app.ConnectDisconnectButton.Enable = "on";
             else
-                app.ConnectButton.Enable = "off";
+                app.ConnectDisconnectButton.Enable = "off";
             end
         end
 
-        % Value changed function: StartPulsatileFlowWIPButton
-        function StartPulsatileFlowWIPButtonValueChanged(app, event)
-            app.pulsatileFlowEnabled = app.StartPulsatileFlowWIPButton.Value;
+        % Value changed function: StartPulsatileFlowButton
+        function StartPulsatileFlowButtonValueChanged(app, event)
+            app.pulsatileFlowEnabled = app.StartPulsatileFlowButton.Value;
             app.setControlMode("Pulsatile");
         end
 
@@ -1273,18 +1257,59 @@ classdef CCTA_exported < matlab.apps.AppBase
 
         % Button pushed function: CalibrateButton
         function CalibrateButtonPushed(app, event)
-            choice = questdlg( ...
-                'Setting pump to 10% power. Please debubble the system. Once the system has been debubbled, press "Continue" to complete calibration.', ...
-                'SHO Calibration', ...
-                'Continue', 'Cancel', 'Continue');
+            % Optional: make the dialog modal if you want, but it'll still be non-blocking
+            d.WindowStyle = 'normal';
 
-            % Check user choice
-            if strcmp(choice, 'Continue')
-                continueSHOCalibration(app);
-            else
-                % Optional: handle cancellation
-                disp('Calibration cancelled.');
+            % Set pump power
+            app.setControlMode("Calibration");
+            calibrationPower = 0.1;
+            app.flowDutyCycle = round(calibrationPower * app.ARDUINO_ANALOGWRITE_MAX);
+            app.CurrentPumpAnalogWriteValueEditField.Value = app.flowDutyCycle;
+            app.PumpPowerSlider.Value = app.flowDutyCycle / app.ARDUINO_ANALOGWRITE_MAX * app.PumpPowerSlider.Limits(2);
+
+            % Disable UI to prevent interference with calibration
+            app.setGUIEnabledCalibration(false);
+
+            % Create non-blocking custom dialog
+            %
+            % Must create after setting other settings above to prevent rest of
+            % code from running in the wrong order
+            d = uifigure('Name', 'SHO Calibration', 'Position', [500 500 400 200]);
+
+            uilabel(d, ...
+                'Text', 'Setting pump to 10% power. Please debubble the system. Once the system has been debubbled, press "Continue" to complete calibration.', ...
+                'Position', [20 80 360 80], ...
+                'FontSize', 12, ...
+                'FontWeight', 'bold', ...
+                'HorizontalAlignment', 'left', ...
+                'WordWrap', 'on');
+
+            uibutton(d, 'Text', 'Continue', ...
+                'Position', [90 20 100 30], ...
+                'FontSize', 12, ...
+                'ButtonPushedFcn', @(btn, event) onDialogResponse(app, d, 'Continue'));
+
+            uibutton(d, 'Text', 'Cancel', ...
+                'Position', [210 20 100 30], ...
+                'FontSize', 12, ...
+                'ButtonPushedFcn', @(btn, event) onDialogResponse(app, d, 'Cancel'));
+
+            % Nested function handles the response
+            function onDialogResponse(app, dialogFig, choice)
+                delete(dialogFig);  % Close dialog
+                if strcmp(choice, 'Continue')
+                    app.continueSHOCalibration();
+                else
+                    disp('Calibration cancelled.');
+                    app.setGUIEnabledCalibration(true);
+                end
             end
+        end
+
+        % Value changed function: CalibrationdurationsEditField
+        function CalibrationdurationsEditFieldValueChanged(app, event)
+            app.CALIBRATION_DURATION = app.CalibrationdurationsEditField.Value;
+            app.dimEditFieldTemporarily(app.CalibrationdurationsEditField);
         end
     end
 
@@ -1652,12 +1677,12 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.ControlModeSwitch.Position = [192 92 45 20];
             app.ControlModeSwitch.Value = 'Manual';
 
-            % Create StartPulsatileFlowWIPButton
-            app.StartPulsatileFlowWIPButton = uibutton(app.PumpControlPanel, 'state');
-            app.StartPulsatileFlowWIPButton.ValueChangedFcn = createCallbackFcn(app, @StartPulsatileFlowWIPButtonValueChanged, true);
-            app.StartPulsatileFlowWIPButton.Enable = 'off';
-            app.StartPulsatileFlowWIPButton.Text = 'Start Pulsatile Flow (WIP)';
-            app.StartPulsatileFlowWIPButton.Position = [72 4 152 23];
+            % Create StartPulsatileFlowButton
+            app.StartPulsatileFlowButton = uibutton(app.PumpControlPanel, 'state');
+            app.StartPulsatileFlowButton.ValueChangedFcn = createCallbackFcn(app, @StartPulsatileFlowButtonValueChanged, true);
+            app.StartPulsatileFlowButton.Enable = 'off';
+            app.StartPulsatileFlowButton.Text = 'Start Pulsatile Flow';
+            app.StartPulsatileFlowButton.Position = [89 4 118 23];
 
             % Create FlowGraphPanel
             app.FlowGraphPanel = uipanel(app.MainTab);
@@ -1695,16 +1720,16 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.Panel.BackgroundColor = [0.9412 0.9412 0.9412];
             app.Panel.Position = [324 69 893 63];
 
-            % Create ConnectButton
-            app.ConnectButton = uibutton(app.Panel, 'push');
-            app.ConnectButton.ButtonPushedFcn = createCallbackFcn(app, @ConnectButtonPushed, true);
-            app.ConnectButton.BackgroundColor = [1 0 0];
-            app.ConnectButton.FontSize = 14;
-            app.ConnectButton.FontWeight = 'bold';
-            app.ConnectButton.FontColor = [0.149 0.149 0.149];
-            app.ConnectButton.Enable = 'off';
-            app.ConnectButton.Position = [600 14 126 31];
-            app.ConnectButton.Text = 'Connect';
+            % Create ConnectDisconnectButton
+            app.ConnectDisconnectButton = uibutton(app.Panel, 'push');
+            app.ConnectDisconnectButton.ButtonPushedFcn = createCallbackFcn(app, @ConnectDisconnectButtonPushed, true);
+            app.ConnectDisconnectButton.BackgroundColor = [1 0 0];
+            app.ConnectDisconnectButton.FontSize = 14;
+            app.ConnectDisconnectButton.FontWeight = 'bold';
+            app.ConnectDisconnectButton.FontColor = [0.149 0.149 0.149];
+            app.ConnectDisconnectButton.Enable = 'off';
+            app.ConnectDisconnectButton.Position = [600 14 126 31];
+            app.ConnectDisconnectButton.Text = 'Connect';
 
             % Create RefreshConnectionsButton
             app.RefreshConnectionsButton = uibutton(app.Panel, 'push');
@@ -1741,13 +1766,13 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.ConnectionDropDown.Position = [324 14 126 31];
             app.ConnectionDropDown.Value = {};
 
-            % Create GraphOptionsPanel
-            app.GraphOptionsPanel = uipanel(app.MainTab);
-            app.GraphOptionsPanel.BorderWidth = 0;
-            app.GraphOptionsPanel.Position = [324 11 893 52];
+            % Create ButtonsPanel
+            app.ButtonsPanel = uipanel(app.MainTab);
+            app.ButtonsPanel.BorderWidth = 0;
+            app.ButtonsPanel.Position = [324 11 893 52];
 
             % Create PauseGraphsButton
-            app.PauseGraphsButton = uibutton(app.GraphOptionsPanel, 'state');
+            app.PauseGraphsButton = uibutton(app.ButtonsPanel, 'state');
             app.PauseGraphsButton.Enable = 'off';
             app.PauseGraphsButton.Icon = fullfile(pathToMLAPP, 'assets', 'pause_icon.png');
             app.PauseGraphsButton.Text = 'Pause Graphs';
@@ -1758,7 +1783,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.PauseGraphsButton.Position = [458 10 136 31];
 
             % Create ClearDataButton
-            app.ClearDataButton = uibutton(app.GraphOptionsPanel, 'push');
+            app.ClearDataButton = uibutton(app.ButtonsPanel, 'push');
             app.ClearDataButton.ButtonPushedFcn = createCallbackFcn(app, @ClearDataButtonPushed, true);
             app.ClearDataButton.Icon = fullfile(pathToMLAPP, 'assets', 'eraser_white.png');
             app.ClearDataButton.BackgroundColor = [0.1569 0.5725 0.8431];
@@ -1770,7 +1795,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.ClearDataButton.Text = 'Clear Data';
 
             % Create ExportDataButton
-            app.ExportDataButton = uibutton(app.GraphOptionsPanel, 'push');
+            app.ExportDataButton = uibutton(app.ButtonsPanel, 'push');
             app.ExportDataButton.ButtonPushedFcn = createCallbackFcn(app, @ExportDataButtonPushed, true);
             app.ExportDataButton.Icon = fullfile(pathToMLAPP, 'assets', 'export.png');
             app.ExportDataButton.BackgroundColor = [0.1569 0.5725 0.8431];
@@ -1782,7 +1807,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.ExportDataButton.Text = 'Export Data';
 
             % Create CalibrateButton
-            app.CalibrateButton = uibutton(app.GraphOptionsPanel, 'push');
+            app.CalibrateButton = uibutton(app.ButtonsPanel, 'push');
             app.CalibrateButton.ButtonPushedFcn = createCallbackFcn(app, @CalibrateButtonPushed, true);
             app.CalibrateButton.BackgroundColor = [0.1569 0.5725 0.8431];
             app.CalibrateButton.FontSize = 14;
@@ -1918,6 +1943,39 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.SimulateDataCheckBox.Text = 'Simulate Data?';
             app.SimulateDataCheckBox.Position = [14 88 160 22];
 
+            % Create CurrentPumpAnalogWriteValue0255EditFieldLabel
+            app.CurrentPumpAnalogWriteValue0255EditFieldLabel = uilabel(app.SettingsTab);
+            app.CurrentPumpAnalogWriteValue0255EditFieldLabel.HorizontalAlignment = 'right';
+            app.CurrentPumpAnalogWriteValue0255EditFieldLabel.FontWeight = 'bold';
+            app.CurrentPumpAnalogWriteValue0255EditFieldLabel.Position = [773 431 201 30];
+            app.CurrentPumpAnalogWriteValue0255EditFieldLabel.Text = {'Current Pump Analog Write Value '; '(0-255)'};
+
+            % Create CurrentPumpAnalogWriteValueEditField
+            app.CurrentPumpAnalogWriteValueEditField = uieditfield(app.SettingsTab, 'numeric');
+            app.CurrentPumpAnalogWriteValueEditField.Limits = [0 255];
+            app.CurrentPumpAnalogWriteValueEditField.RoundFractionalValues = 'on';
+            app.CurrentPumpAnalogWriteValueEditField.ValueChangedFcn = createCallbackFcn(app, @CurrentPumpAnalogWriteValueEditFieldValueChanged, true);
+            app.CurrentPumpAnalogWriteValueEditField.Editable = 'off';
+            app.CurrentPumpAnalogWriteValueEditField.Position = [989 439 66 22];
+
+            % Create OtherSettingsPanel
+            app.OtherSettingsPanel = uipanel(app.SettingsTab);
+            app.OtherSettingsPanel.Title = 'Other Settings';
+            app.OtherSettingsPanel.Position = [17 238 469 73];
+
+            % Create CalibrationdurationsEditFieldLabel
+            app.CalibrationdurationsEditFieldLabel = uilabel(app.OtherSettingsPanel);
+            app.CalibrationdurationsEditFieldLabel.HorizontalAlignment = 'right';
+            app.CalibrationdurationsEditFieldLabel.Position = [116 13 126 22];
+            app.CalibrationdurationsEditFieldLabel.Text = 'Calibration duration (s)';
+
+            % Create CalibrationdurationsEditField
+            app.CalibrationdurationsEditField = uieditfield(app.OtherSettingsPanel, 'numeric');
+            app.CalibrationdurationsEditField.Limits = [0 Inf];
+            app.CalibrationdurationsEditField.ValueChangedFcn = createCallbackFcn(app, @CalibrationdurationsEditFieldValueChanged, true);
+            app.CalibrationdurationsEditField.Position = [257 13 100 22];
+            app.CalibrationdurationsEditField.Value = 30;
+
             % Create HelpTab
             app.HelpTab = uitab(app.TabGroup2);
             app.HelpTab.Title = 'Help';
@@ -1926,64 +1984,6 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.HTML = uihtml(app.HelpTab);
             app.HTML.HTMLSource = './assets/help.html';
             app.HTML.Position = [16 10 1201 456];
-
-            % Create ExtraTab
-            app.ExtraTab = uitab(app.TabGroup2);
-            app.ExtraTab.Title = 'Extra';
-
-            % Create PressureValveControlNotAvailablePanel
-            app.PressureValveControlNotAvailablePanel = uipanel(app.ExtraTab);
-            app.PressureValveControlNotAvailablePanel.Title = 'Pressure Valve Control (Not Available)';
-            app.PressureValveControlNotAvailablePanel.Position = [24 323 260 141];
-
-            % Create MotorStepNumberEditFieldLabel
-            app.MotorStepNumberEditFieldLabel = uilabel(app.PressureValveControlNotAvailablePanel);
-            app.MotorStepNumberEditFieldLabel.HorizontalAlignment = 'right';
-            app.MotorStepNumberEditFieldLabel.Enable = 'off';
-            app.MotorStepNumberEditFieldLabel.Position = [17 79 110 22];
-            app.MotorStepNumberEditFieldLabel.Text = 'Motor Step Number';
-
-            % Create MotorStepNumberEditField
-            app.MotorStepNumberEditField = uieditfield(app.PressureValveControlNotAvailablePanel, 'numeric');
-            app.MotorStepNumberEditField.Limits = [0 200];
-            app.MotorStepNumberEditField.RoundFractionalValues = 'on';
-            app.MotorStepNumberEditField.ValueChangedFcn = createCallbackFcn(app, @MotorStepNumberEditFieldValueChanged, true);
-            app.MotorStepNumberEditField.Enable = 'off';
-            app.MotorStepNumberEditField.Position = [142 79 100 22];
-
-            % Create ClosedSliderLabel
-            app.ClosedSliderLabel = uilabel(app.PressureValveControlNotAvailablePanel);
-            app.ClosedSliderLabel.HorizontalAlignment = 'right';
-            app.ClosedSliderLabel.Enable = 'off';
-            app.ClosedSliderLabel.Position = [9 33 56 22];
-            app.ClosedSliderLabel.Text = '% Closed';
-
-            % Create ClosedSlider
-            app.ClosedSlider = uislider(app.PressureValveControlNotAvailablePanel);
-            app.ClosedSlider.ValueChangedFcn = createCallbackFcn(app, @ClosedSliderValueChanged, true);
-            app.ClosedSlider.Enable = 'off';
-            app.ClosedSlider.Position = [86 42 150 3];
-
-            % Create PumpAnalogWriteValue0255EditFieldLabel
-            app.PumpAnalogWriteValue0255EditFieldLabel = uilabel(app.ExtraTab);
-            app.PumpAnalogWriteValue0255EditFieldLabel.HorizontalAlignment = 'right';
-            app.PumpAnalogWriteValue0255EditFieldLabel.FontWeight = 'bold';
-            app.PumpAnalogWriteValue0255EditFieldLabel.Position = [50 271 153 30];
-            app.PumpAnalogWriteValue0255EditFieldLabel.Text = {'Pump Analog Write Value '; '(0-255)'};
-
-            % Create PumpAnalogWriteValue0255EditField
-            app.PumpAnalogWriteValue0255EditField = uieditfield(app.ExtraTab, 'numeric');
-            app.PumpAnalogWriteValue0255EditField.Limits = [0 255];
-            app.PumpAnalogWriteValue0255EditField.RoundFractionalValues = 'on';
-            app.PumpAnalogWriteValue0255EditField.ValueChangedFcn = createCallbackFcn(app, @PumpAnalogWriteValue0255EditFieldValueChanged, true);
-            app.PumpAnalogWriteValue0255EditField.Editable = 'off';
-            app.PumpAnalogWriteValue0255EditField.Position = [218 279 66 22];
-
-            % Create UITable
-            app.UITable = uitable(app.ExtraTab);
-            app.UITable.ColumnName = {'Column 1'; 'Column 2'; 'Column 3'; 'Column 4'};
-            app.UITable.RowName = {'Sensor 1, Sensor 2, Sensor 3'};
-            app.UITable.Position = [391 219 302 185];
 
             % Show the figure after all components are created
             app.UIFigure.Visible = 'on';
