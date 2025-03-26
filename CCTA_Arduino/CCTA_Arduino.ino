@@ -242,8 +242,7 @@ void serialEvent() {
 void processSerial(String inputString) {
   // Parse each line
   int stepNumber;
-  if (sscanf(inputString.c_str(), "MOT: %d, PMP: %d", &stepNumber, &pumpAnalogWrite) == 2) {
-    rotateMotorToStep(stepNumber);
+  if (sscanf(inputString.c_str(), "PMP: %d", &pumpAnalogWrite) == 1) {
     analogWrite(PUMP_PWM_PIN, pumpAnalogWrite);
   }
 }
