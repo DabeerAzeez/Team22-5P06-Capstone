@@ -32,7 +32,9 @@ classdef CCTA_exported < matlab.apps.AppBase
         PressureGraphPanel             matlab.ui.container.Panel
         PressureAxesWaitingForConnectionLabel  matlab.ui.control.Label
         PressureAxes                   matlab.ui.control.UIAxes
-        Panel_2                        matlab.ui.container.Panel
+        FlowDetailsPanel               matlab.ui.container.Panel
+        Flow_ResetAllLabelButton       matlab.ui.control.Button
+        Flow_ResetAllTargetButton      matlab.ui.control.Button
         Flow2_EditField_Avg            matlab.ui.control.EditField
         Flow1_EditField_Avg            matlab.ui.control.EditField
         AvgSDLabel_2                   matlab.ui.control.Label
@@ -49,10 +51,13 @@ classdef CCTA_exported < matlab.apps.AppBase
         Label_7                        matlab.ui.control.Label
         TargetLabel_2                  matlab.ui.control.Label
         CurrentLabel_2                 matlab.ui.control.Label
-        Flow2_SetPoint                 matlab.ui.control.NumericEditField
-        Flow1_SetPoint                 matlab.ui.control.NumericEditField
+        Flow2_EditField_Target         matlab.ui.control.NumericEditField
+        Flow1_EditField_Target         matlab.ui.control.NumericEditField
         Label_6                        matlab.ui.control.Label
-        Panel                          matlab.ui.container.Panel
+        PressureDetailsPanel           matlab.ui.container.Panel
+        Pressure_ResetAllSHOButton     matlab.ui.control.Button
+        Pressure_ResetAllLabelButton   matlab.ui.control.Button
+        Pressure_ResetAllTargetButton  matlab.ui.control.Button
         Pressure3_EditField_Avg        matlab.ui.control.EditField
         Pressure2_EditField_Avg        matlab.ui.control.EditField
         Pressure1_EditField_Avg        matlab.ui.control.EditField
@@ -78,9 +83,9 @@ classdef CCTA_exported < matlab.apps.AppBase
         Label_2                        matlab.ui.control.Label
         TargetLabel                    matlab.ui.control.Label
         CurrentLabel                   matlab.ui.control.Label
-        Pressure3_SetPoint             matlab.ui.control.NumericEditField
-        Pressure2_SetPoint             matlab.ui.control.NumericEditField
-        Pressure1_SetPoint             matlab.ui.control.NumericEditField
+        Pressure3_EditField_Target     matlab.ui.control.NumericEditField
+        Pressure2_EditField_Target     matlab.ui.control.NumericEditField
+        Pressure1_EditField_Target     matlab.ui.control.NumericEditField
         SettingsTab                    matlab.ui.container.Tab
         OtherSettingsPanel             matlab.ui.container.Panel
         CalibrationdurationsEditField  matlab.ui.control.NumericEditField
@@ -567,11 +572,11 @@ classdef CCTA_exported < matlab.apps.AppBase
         function highlightSetPointUI(app, setpointID)
             % Define all setpoints in a struct for easy iteration
             setpoints = struct(...
-            'Pressure1', app.Pressure1_SetPoint, ...
-            'Pressure2', app.Pressure2_SetPoint, ...
-            'Pressure3', app.Pressure3_SetPoint, ...
-            'Flow1', app.Flow1_SetPoint, ...
-            'Flow2', app.Flow2_SetPoint ...
+            'Pressure1', app.Pressure1_EditField_Target, ...
+            'Pressure2', app.Pressure2_EditField_Target, ...
+            'Pressure3', app.Pressure3_EditField_Target, ...
+            'Flow1', app.Flow1_EditField_Target, ...
+            'Flow2', app.Flow2_EditField_Target ...
             );
 
             % Iterate through all setpoints and update colors
@@ -644,7 +649,7 @@ classdef CCTA_exported < matlab.apps.AppBase
         
         function updateUIColors(app)
             % Color all pressure-related elements
-            pressureElements = [app.Panel, ...
+            pressureElements = [app.PressureDetailsPanel, ...
                 app.PressureGraphPanel, ...
                 app.PressureCoefficientsPanel, ...
                 app.PressureDataTitleLabelPanel];
@@ -654,7 +659,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             end
 
             % Color all flow-related elements
-            flowElements = [app.Panel_2, ...
+            flowElements = [app.FlowDetailsPanel, ...
                 app.FlowGraphPanel, ...
                 app.FlowCoefficientsPanel, ...
                 app.FlowDataTitleLabelPanel];
@@ -664,8 +669,6 @@ classdef CCTA_exported < matlab.apps.AppBase
             end
 
             % Other things
-            app.ConnectDisconnectButton.BackgroundColor = app.COLOR_DISCONNECTED;
-
             otherOptionsElements = [app.ClearDataButton, app.ExportDataButton, app.PauseGraphsButton];
 
             for element = otherOptionsElements
@@ -722,19 +725,39 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.ConnectionDropDown.Enable = "on";
             app.RefreshConnectionsButton.Enable = "on";
             app.ConnectDisconnectButton.Text = "Connect";
-            app.ConnectDisconnectButton.BackgroundColor = app.COLOR_DISCONNECTED;
             app.ConnectedLamp.Color = app.COLOR_DISCONNECTED;
             app.isConnected = false;
             app.setGUIEnabled(false);
 
+            % Pressure/Flow Values
+            app.Pressure1_EditField_Current.Value = 0;
+            app.Pressure1_EditField_Avg.Value = '0';
+            app.Pressure2_EditField_Current.Value = 0;
+            app.Pressure2_EditField_Avg.Value = '0';
+            app.Pressure3_EditField_Current.Value = 0;
+            app.Pressure3_EditField_Avg.Value = '0';
+            app.Pressure_ResetAllTargetButtonPushed();
+            app.Pressure_ResetAllLabelButtonPushed();
+            app.Pressure_ResetAllSHOButtonPushed();
+
+            app.Flow1_EditField_Current.Value = 0;
+            app.Flow1_EditField_Avg.Value = '0';
+            app.Flow2_EditField_Current.Value = 0;
+            app.Flow2_EditField_Avg.Value = '0';
+            app.Flow_ResetAllTargetButtonPushed();
+            app.Flow_ResetAllLabelButtonPushed();
+
+            % Close loading bar
             close(dlg);
         end
 
         function setGUIEnabled(app, state)
             % Gather all UI elements to enable/disable
             uiElements = [
-                app.Panel;
-                app.Panel_2;
+                app.PressureDetailsPanel;
+                app.PressureGraphPanel;
+                app.FlowDetailsPanel;
+                app.FlowGraphPanel;
                 app.PumpControlPanel;
                 app.PumpPowerSlider;
                 app.PIDCoefficientsPanel;
@@ -808,8 +831,8 @@ classdef CCTA_exported < matlab.apps.AppBase
             stateStr = ternary(state, 'on', 'off'); 
 
             % Disable UI to prevent interference with calibration
-            uiElements = [app.Panel, ...
-                app.Panel_2, ...
+            uiElements = [app.PressureDetailsPanel, ...
+                app.FlowDetailsPanel, ...
                 app.OptionsPanel.Children(:)', ...
                 app.PIDCoefficientsPanel, ...
                 app.ConnectDisconnectButton];
@@ -874,7 +897,7 @@ classdef CCTA_exported < matlab.apps.AppBase
                 cla(app.FlowAxes); % Clear previous plots
 
                 if app.Flow1_GraphEnable.Value
-                    plot(app.FlowAxes, app.t, app.flow_vals1, 'Color', app.FLOW_COLOR, 'DisplayName', app.flow1_label, 'LineWidth', lineWidth);
+                    plot(app.FlowAxes, app.t, app.flow_vals1, 'Color', app.FLOW_COLOR*0.7, 'DisplayName', app.flow1_label, 'LineWidth', lineWidth);
                 end
                 if app.Flow2_GraphEnable.Value
                     plot(app.FlowAxes, app.t, app.flow_vals2, 'Color', [0 0 0], 'DisplayName', app.flow2_label, 'LineWidth', lineWidth);
@@ -999,7 +1022,20 @@ classdef CCTA_exported < matlab.apps.AppBase
         % Button pushed function: ClearDataButton
         function ClearDataButtonPushed(app, event)
             % Empty time and sensor data arrays
+            dlg = uiprogressdlg(app.UIFigure, ...
+                'Title', 'Clearing data...', ...
+                'Message', 'Please wait...', ...
+                'Indeterminate', 'on');
+
+            tic;
             app.clearDataArrays();
+
+            if toc < 1
+                pause(1);  % Pause 1 second if data was cleared quickly, to give user feedback
+            end
+
+            close(dlg);
+
             app.runMainLoop();  % Re-run it here from the beginning to reset time array properly
         end
 
@@ -1138,41 +1174,41 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.flow2_label = app.Flow2_LabelField.Value;
         end
 
-        % Value changed function: Flow1_SetPoint
-        function Flow1_SetPointValueChanged(app, event)
-            app.PID_setpoint = app.Flow1_SetPoint.Value;
+        % Value changed function: Flow1_EditField_Target
+        function Flow1_EditField_TargetValueChanged(app, event)
+            app.PID_setpoint = app.Flow1_EditField_Target.Value;
             app.setControlMode("PID");
             app.highlightSetPointUI("Flow1");
             app.PID_setpoint_id = "Flow1";
         end
 
-        % Value changed function: Flow2_SetPoint
-        function Flow2_SetPointValueChanged(app, event)
-            app.PID_setpoint = app.Flow2_SetPoint.Value;
+        % Value changed function: Flow2_EditField_Target
+        function Flow2_EditField_TargetValueChanged(app, event)
+            app.PID_setpoint = app.Flow2_EditField_Target.Value;
             app.setControlMode("PID");
             app.highlightSetPointUI("Flow2");
             app.PID_setpoint_id = "Flow2";
         end
 
-        % Value changed function: Pressure1_SetPoint
-        function Pressure1_SetPointValueChanged(app, event)
-            app.PID_setpoint = app.Pressure1_SetPoint.Value;
+        % Value changed function: Pressure1_EditField_Target
+        function Pressure1_EditField_TargetValueChanged(app, event)
+            app.PID_setpoint = app.Pressure1_EditField_Target.Value;
             app.setControlMode("PID");
             app.highlightSetPointUI("Pressure1");
             app.PID_setpoint_id = "Pressure1";
         end
 
-        % Value changed function: Pressure2_SetPoint
-        function Pressure2_SetPointValueChanged(app, event)
-            app.PID_setpoint = app.Pressure2_SetPoint.Value;
+        % Value changed function: Pressure2_EditField_Target
+        function Pressure2_EditField_TargetValueChanged(app, event)
+            app.PID_setpoint = app.Pressure2_EditField_Target.Value;
             app.setControlMode("PID");
             app.highlightSetPointUI("Pressure2");
             app.PID_setpoint_id = "Pressure2";
         end
 
-        % Value changed function: Pressure3_SetPoint
-        function Pressure3_SetPointValueChanged(app, event)
-            app.PID_setpoint = app.Pressure3_SetPoint.Value;
+        % Value changed function: Pressure3_EditField_Target
+        function Pressure3_EditField_TargetValueChanged(app, event)
+            app.PID_setpoint = app.Pressure3_EditField_Target.Value;
             app.setControlMode("PID");
             app.highlightSetPointUI("Pressure3");
             app.PID_setpoint_id = "Pressure3";
@@ -1329,6 +1365,75 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.CALIBRATION_DURATION = app.CalibrationdurationsEditField.Value;
             app.dimEditFieldTemporarily(app.CalibrationdurationsEditField);
         end
+
+        % Button pushed function: Pressure_ResetAllTargetButton
+        function Pressure_ResetAllTargetButtonPushed(app, event)
+            app.PID_setpoint = [];
+            app.setControlMode("Manual");
+            app.highlightSetPointUI("None");
+            app.PID_setpoint_id = "None";
+
+            app.Pressure1_EditField_Target.Value = 0;
+            app.Pressure2_EditField_Target.Value = 0;
+            app.Pressure3_EditField_Target.Value = 0;
+        end
+
+        % Button pushed function: Flow_ResetAllTargetButton
+        function Flow_ResetAllTargetButtonPushed(app, event)
+            app.PID_setpoint = [];
+            app.setControlMode("Manual");
+            app.highlightSetPointUI("None");
+            app.PID_setpoint_id = "None";
+
+            app.Flow1_EditField_Target.Value = 0;
+            app.Flow2_EditField_Target.Value = 0;
+        end
+
+        % Button pushed function: Pressure_ResetAllLabelButton
+        function Pressure_ResetAllLabelButtonPushed(app, event)
+            app.pressure1_label = "1";
+            app.Pressure1_LabelField.Value = "1";
+
+            app.pressure2_label = "2";
+            app.Pressure2_LabelField.Value = "2";
+
+            app.pressure3_label = "3";
+            app.Pressure3_LabelField.Value = "3";
+        end
+
+        % Button pushed function: Pressure_ResetAllSHOButton
+        function Pressure_ResetAllSHOButtonPushed(app, event)
+            app.SHO_Pressure1 = 0;
+            app.Pressure1_EditField_SHO.Value = 0;
+
+            app.SHO_Pressure2 = 0;
+            app.Pressure2_EditField_SHO.Value = 0;
+
+            app.SHO_Pressure3 = 0;
+            app.Pressure3_EditField_SHO.Value = 0;
+        end
+
+        % Button pushed function: Flow_ResetAllLabelButton
+        function Flow_ResetAllLabelButtonPushed(app, event)
+            app.flow1_label = "1";
+            app.Flow1_LabelField.Value = "1";
+
+            app.flow2_label = "2";
+            app.Flow2_LabelField.Value = "2";
+        end
+
+        % Value changed function: PauseGraphsButton
+        function PauseGraphsButtonValueChanged(app, event)
+            value = app.PauseGraphsButton.Value;
+            
+            if value == true
+                app.PauseGraphsButton.BackgroundColor = app.COLOR_DISCONNECTED;
+                app.PauseGraphsButton.Text = "Unpause Graphs";
+            else
+                app.PauseGraphsButton.BackgroundColor = app.BUTTON_COLOR1;
+                app.PauseGraphsButton.Text = "Pause Graphs";
+            end
+        end
     end
 
     % Component initialization
@@ -1342,359 +1447,410 @@ classdef CCTA_exported < matlab.apps.AppBase
 
             % Create UIFigure and hide until all components are created
             app.UIFigure = uifigure('Visible', 'off');
-            app.UIFigure.Position = [100 100 1240 545];
+            app.UIFigure.Position = [100 100 1240 564];
             app.UIFigure.Name = 'MATLAB App';
 
             % Create TabGroup2
             app.TabGroup2 = uitabgroup(app.UIFigure);
-            app.TabGroup2.Position = [1 0 1240 546];
+            app.TabGroup2.Position = [1 1 1240 564];
 
             % Create MainTab
             app.MainTab = uitab(app.TabGroup2);
             app.MainTab.Title = 'Main';
 
-            % Create Panel
-            app.Panel = uipanel(app.MainTab);
-            app.Panel.Enable = 'off';
-            app.Panel.BackgroundColor = [0.8392 0.8275 0.8588];
-            app.Panel.FontWeight = 'bold';
-            app.Panel.Position = [329 12 435 132];
+            % Create PressureDetailsPanel
+            app.PressureDetailsPanel = uipanel(app.MainTab);
+            app.PressureDetailsPanel.Enable = 'off';
+            app.PressureDetailsPanel.BackgroundColor = [0.8392 0.8275 0.8588];
+            app.PressureDetailsPanel.FontWeight = 'bold';
+            app.PressureDetailsPanel.Position = [329 12 435 150];
 
-            % Create Pressure1_SetPoint
-            app.Pressure1_SetPoint = uieditfield(app.Panel, 'numeric');
-            app.Pressure1_SetPoint.Limits = [0 Inf];
-            app.Pressure1_SetPoint.ValueChangedFcn = createCallbackFcn(app, @Pressure1_SetPointValueChanged, true);
-            app.Pressure1_SetPoint.HorizontalAlignment = 'center';
-            app.Pressure1_SetPoint.Tooltip = {'Target value for PID control'};
-            app.Pressure1_SetPoint.Position = [121 77 44 22];
+            % Create Pressure1_EditField_Target
+            app.Pressure1_EditField_Target = uieditfield(app.PressureDetailsPanel, 'numeric');
+            app.Pressure1_EditField_Target.Limits = [0 Inf];
+            app.Pressure1_EditField_Target.ValueChangedFcn = createCallbackFcn(app, @Pressure1_EditField_TargetValueChanged, true);
+            app.Pressure1_EditField_Target.HorizontalAlignment = 'center';
+            app.Pressure1_EditField_Target.Tooltip = {'Target value for PID control'};
+            app.Pressure1_EditField_Target.Position = [121 91 44 22];
 
-            % Create Pressure2_SetPoint
-            app.Pressure2_SetPoint = uieditfield(app.Panel, 'numeric');
-            app.Pressure2_SetPoint.Limits = [0 Inf];
-            app.Pressure2_SetPoint.ValueChangedFcn = createCallbackFcn(app, @Pressure2_SetPointValueChanged, true);
-            app.Pressure2_SetPoint.HorizontalAlignment = 'center';
-            app.Pressure2_SetPoint.Tooltip = {'Target value for PID control'};
-            app.Pressure2_SetPoint.Position = [121 47 44 22];
+            % Create Pressure2_EditField_Target
+            app.Pressure2_EditField_Target = uieditfield(app.PressureDetailsPanel, 'numeric');
+            app.Pressure2_EditField_Target.Limits = [0 Inf];
+            app.Pressure2_EditField_Target.ValueChangedFcn = createCallbackFcn(app, @Pressure2_EditField_TargetValueChanged, true);
+            app.Pressure2_EditField_Target.HorizontalAlignment = 'center';
+            app.Pressure2_EditField_Target.Tooltip = {'Target value for PID control'};
+            app.Pressure2_EditField_Target.Position = [121 61 44 22];
 
-            % Create Pressure3_SetPoint
-            app.Pressure3_SetPoint = uieditfield(app.Panel, 'numeric');
-            app.Pressure3_SetPoint.Limits = [0 Inf];
-            app.Pressure3_SetPoint.ValueChangedFcn = createCallbackFcn(app, @Pressure3_SetPointValueChanged, true);
-            app.Pressure3_SetPoint.HorizontalAlignment = 'center';
-            app.Pressure3_SetPoint.Tooltip = {'Target value for PID control'};
-            app.Pressure3_SetPoint.Position = [121 15 44 22];
+            % Create Pressure3_EditField_Target
+            app.Pressure3_EditField_Target = uieditfield(app.PressureDetailsPanel, 'numeric');
+            app.Pressure3_EditField_Target.Limits = [0 Inf];
+            app.Pressure3_EditField_Target.ValueChangedFcn = createCallbackFcn(app, @Pressure3_EditField_TargetValueChanged, true);
+            app.Pressure3_EditField_Target.HorizontalAlignment = 'center';
+            app.Pressure3_EditField_Target.Tooltip = {'Target value for PID control'};
+            app.Pressure3_EditField_Target.Position = [121 29 44 22];
 
             % Create CurrentLabel
-            app.CurrentLabel = uilabel(app.Panel);
-            app.CurrentLabel.Position = [70 99 42 22];
+            app.CurrentLabel = uilabel(app.PressureDetailsPanel);
+            app.CurrentLabel.Position = [70 117 42 22];
             app.CurrentLabel.Text = 'Current';
 
             % Create TargetLabel
-            app.TargetLabel = uilabel(app.Panel);
+            app.TargetLabel = uilabel(app.PressureDetailsPanel);
             app.TargetLabel.HorizontalAlignment = 'center';
-            app.TargetLabel.Position = [121 99 44 22];
+            app.TargetLabel.Position = [121 117 44 22];
             app.TargetLabel.Text = 'Target';
 
             % Create Label_2
-            app.Label_2 = uilabel(app.Panel);
+            app.Label_2 = uilabel(app.PressureDetailsPanel);
             app.Label_2.HorizontalAlignment = 'center';
             app.Label_2.FontWeight = 'bold';
-            app.Label_2.Position = [26 78 25 22];
+            app.Label_2.Position = [26 92 25 22];
             app.Label_2.Text = '1';
 
             % Create Pressure1_EditField_Current
-            app.Pressure1_EditField_Current = uieditfield(app.Panel, 'numeric');
+            app.Pressure1_EditField_Current = uieditfield(app.PressureDetailsPanel, 'numeric');
             app.Pressure1_EditField_Current.Editable = 'off';
             app.Pressure1_EditField_Current.HorizontalAlignment = 'center';
             app.Pressure1_EditField_Current.Tooltip = {'Current pressure reading (mmHg) for pressure sensor 1 (see label on sensor).'};
-            app.Pressure1_EditField_Current.Position = [69 77 44 22];
+            app.Pressure1_EditField_Current.Position = [69 91 44 22];
 
             % Create Label_3
-            app.Label_3 = uilabel(app.Panel);
+            app.Label_3 = uilabel(app.PressureDetailsPanel);
             app.Label_3.HorizontalAlignment = 'center';
             app.Label_3.FontWeight = 'bold';
-            app.Label_3.Position = [26 47 25 22];
+            app.Label_3.Position = [26 61 25 22];
             app.Label_3.Text = '2';
 
             % Create Pressure2_EditField_Current
-            app.Pressure2_EditField_Current = uieditfield(app.Panel, 'numeric');
+            app.Pressure2_EditField_Current = uieditfield(app.PressureDetailsPanel, 'numeric');
             app.Pressure2_EditField_Current.Editable = 'off';
             app.Pressure2_EditField_Current.HorizontalAlignment = 'center';
             app.Pressure2_EditField_Current.Tooltip = {'Current pressure reading (mmHg) for pressure sensor 2 (see label on sensor).'};
-            app.Pressure2_EditField_Current.Position = [70 48 43 22];
+            app.Pressure2_EditField_Current.Position = [70 62 43 22];
 
             % Create Label_4
-            app.Label_4 = uilabel(app.Panel);
+            app.Label_4 = uilabel(app.PressureDetailsPanel);
             app.Label_4.HorizontalAlignment = 'center';
             app.Label_4.FontWeight = 'bold';
-            app.Label_4.Position = [26 16 25 22];
+            app.Label_4.Position = [26 30 25 22];
             app.Label_4.Text = '3';
 
             % Create Pressure3_EditField_Current
-            app.Pressure3_EditField_Current = uieditfield(app.Panel, 'numeric');
+            app.Pressure3_EditField_Current = uieditfield(app.PressureDetailsPanel, 'numeric');
             app.Pressure3_EditField_Current.Editable = 'off';
             app.Pressure3_EditField_Current.HorizontalAlignment = 'center';
             app.Pressure3_EditField_Current.Tooltip = {'Current pressure reading (mmHg) for pressure sensor 3 (see label on sensor).'};
-            app.Pressure3_EditField_Current.Position = [70 16 43 22];
+            app.Pressure3_EditField_Current.Position = [70 30 43 22];
 
             % Create SensorLabel
-            app.SensorLabel = uilabel(app.Panel);
+            app.SensorLabel = uilabel(app.PressureDetailsPanel);
             app.SensorLabel.HorizontalAlignment = 'center';
             app.SensorLabel.FontWeight = 'bold';
-            app.SensorLabel.Position = [16 99 45 22];
+            app.SensorLabel.Position = [16 117 45 22];
             app.SensorLabel.Text = 'Sensor';
 
             % Create Pressure3_GraphEnable
-            app.Pressure3_GraphEnable = uicheckbox(app.Panel);
+            app.Pressure3_GraphEnable = uicheckbox(app.PressureDetailsPanel);
             app.Pressure3_GraphEnable.Text = '';
-            app.Pressure3_GraphEnable.Position = [398 14 14 22];
+            app.Pressure3_GraphEnable.Position = [398 28 14 22];
             app.Pressure3_GraphEnable.Value = true;
 
             % Create Pressure2_GraphEnable
-            app.Pressure2_GraphEnable = uicheckbox(app.Panel);
+            app.Pressure2_GraphEnable = uicheckbox(app.PressureDetailsPanel);
             app.Pressure2_GraphEnable.Text = '';
-            app.Pressure2_GraphEnable.Position = [398 45 16 22];
+            app.Pressure2_GraphEnable.Position = [398 59 16 22];
             app.Pressure2_GraphEnable.Value = true;
 
             % Create Pressure1_GraphEnable
-            app.Pressure1_GraphEnable = uicheckbox(app.Panel);
+            app.Pressure1_GraphEnable = uicheckbox(app.PressureDetailsPanel);
             app.Pressure1_GraphEnable.Text = '';
-            app.Pressure1_GraphEnable.Position = [398 77 16 22];
+            app.Pressure1_GraphEnable.Position = [398 91 16 22];
             app.Pressure1_GraphEnable.Value = true;
 
             % Create Label_5
-            app.Label_5 = uilabel(app.Panel);
+            app.Label_5 = uilabel(app.PressureDetailsPanel);
             app.Label_5.HorizontalAlignment = 'center';
-            app.Label_5.Position = [268 99 63 22];
+            app.Label_5.Position = [268 117 63 22];
 
             % Create Pressure1_LabelField
-            app.Pressure1_LabelField = uieditfield(app.Panel, 'text');
+            app.Pressure1_LabelField = uieditfield(app.PressureDetailsPanel, 'text');
             app.Pressure1_LabelField.ValueChangedFcn = createCallbackFcn(app, @Pressure1_LabelFieldValueChanged, true);
             app.Pressure1_LabelField.HorizontalAlignment = 'center';
             app.Pressure1_LabelField.FontAngle = 'italic';
             app.Pressure1_LabelField.Tooltip = {'Graph label for this sensor (changes legend entry).'};
-            app.Pressure1_LabelField.Position = [268 77 63 22];
+            app.Pressure1_LabelField.Position = [268 91 63 22];
             app.Pressure1_LabelField.Value = '1';
 
             % Create Pressure2_LabelField
-            app.Pressure2_LabelField = uieditfield(app.Panel, 'text');
+            app.Pressure2_LabelField = uieditfield(app.PressureDetailsPanel, 'text');
             app.Pressure2_LabelField.ValueChangedFcn = createCallbackFcn(app, @Pressure2_LabelFieldValueChanged, true);
             app.Pressure2_LabelField.HorizontalAlignment = 'center';
             app.Pressure2_LabelField.FontAngle = 'italic';
             app.Pressure2_LabelField.Tooltip = {'Graph label for this sensor (changes legend entry).'};
-            app.Pressure2_LabelField.Position = [269 46 62 22];
+            app.Pressure2_LabelField.Position = [269 60 62 22];
             app.Pressure2_LabelField.Value = '2';
 
             % Create Pressure3_LabelField
-            app.Pressure3_LabelField = uieditfield(app.Panel, 'text');
+            app.Pressure3_LabelField = uieditfield(app.PressureDetailsPanel, 'text');
             app.Pressure3_LabelField.ValueChangedFcn = createCallbackFcn(app, @Pressure3_LabelFieldValueChanged, true);
             app.Pressure3_LabelField.HorizontalAlignment = 'center';
             app.Pressure3_LabelField.FontAngle = 'italic';
             app.Pressure3_LabelField.Tooltip = {'Graph label for this sensor (changes legend entry).'};
-            app.Pressure3_LabelField.Position = [269 15 62 22];
+            app.Pressure3_LabelField.Position = [269 29 62 22];
             app.Pressure3_LabelField.Value = '3';
 
             % Create Label_11
-            app.Label_11 = uilabel(app.Panel);
+            app.Label_11 = uilabel(app.PressureDetailsPanel);
             app.Label_11.HorizontalAlignment = 'center';
             app.Label_11.FontSize = 18;
-            app.Label_11.Position = [391 99 30 23];
+            app.Label_11.Position = [391 117 30 23];
             app.Label_11.Text = '👁️';
 
             % Create SHOLabel_Pressure
-            app.SHOLabel_Pressure = uilabel(app.Panel);
+            app.SHOLabel_Pressure = uilabel(app.PressureDetailsPanel);
             app.SHOLabel_Pressure.HorizontalAlignment = 'center';
             app.SHOLabel_Pressure.Tooltip = {'SHO - Static Head Offset. Adjusts for pressure changes caused by fluid height differences in the system.'};
-            app.SHOLabel_Pressure.Position = [340 99 43 22];
+            app.SHOLabel_Pressure.Position = [340 117 43 22];
             app.SHOLabel_Pressure.Text = 'SHO';
 
             % Create Pressure1_EditField_SHO
-            app.Pressure1_EditField_SHO = uieditfield(app.Panel, 'numeric');
+            app.Pressure1_EditField_SHO = uieditfield(app.PressureDetailsPanel, 'numeric');
             app.Pressure1_EditField_SHO.ValueChangedFcn = createCallbackFcn(app, @Pressure1_EditField_SHOValueChanged, true);
             app.Pressure1_EditField_SHO.HorizontalAlignment = 'center';
             app.Pressure1_EditField_SHO.Tooltip = {'SHO - Static Head Offset. Adjusts for pressure changes caused by fluid height differences in the system.'};
-            app.Pressure1_EditField_SHO.Position = [340 77 43 22];
+            app.Pressure1_EditField_SHO.Position = [340 91 43 22];
 
             % Create Pressure2_EditField_SHO
-            app.Pressure2_EditField_SHO = uieditfield(app.Panel, 'numeric');
+            app.Pressure2_EditField_SHO = uieditfield(app.PressureDetailsPanel, 'numeric');
             app.Pressure2_EditField_SHO.ValueChangedFcn = createCallbackFcn(app, @Pressure2_EditField_SHOValueChanged2, true);
             app.Pressure2_EditField_SHO.HorizontalAlignment = 'center';
             app.Pressure2_EditField_SHO.Tooltip = {'SHO - Static Head Offset. Adjusts for pressure changes caused by fluid height differences in the system.'};
-            app.Pressure2_EditField_SHO.Position = [340 48 43 22];
+            app.Pressure2_EditField_SHO.Position = [340 62 43 22];
 
             % Create Pressure3_EditField_SHO
-            app.Pressure3_EditField_SHO = uieditfield(app.Panel, 'numeric');
+            app.Pressure3_EditField_SHO = uieditfield(app.PressureDetailsPanel, 'numeric');
             app.Pressure3_EditField_SHO.ValueChangedFcn = createCallbackFcn(app, @Pressure3_EditField_SHOValueChanged2, true);
             app.Pressure3_EditField_SHO.HorizontalAlignment = 'center';
             app.Pressure3_EditField_SHO.Tooltip = {'SHO - Static Head Offset. Adjusts for pressure changes caused by fluid height differences in the system.'};
-            app.Pressure3_EditField_SHO.Position = [340 16 43 22];
+            app.Pressure3_EditField_SHO.Position = [340 30 43 22];
 
             % Create AvgSDLabel
-            app.AvgSDLabel = uilabel(app.Panel);
+            app.AvgSDLabel = uilabel(app.PressureDetailsPanel);
             app.AvgSDLabel.HorizontalAlignment = 'center';
-            app.AvgSDLabel.Position = [174 99 85 22];
+            app.AvgSDLabel.Position = [174 117 85 22];
             app.AvgSDLabel.Text = 'Avg ± SD';
 
             % Create Pressure1_EditField_Avg
-            app.Pressure1_EditField_Avg = uieditfield(app.Panel, 'text');
+            app.Pressure1_EditField_Avg = uieditfield(app.PressureDetailsPanel, 'text');
+            app.Pressure1_EditField_Avg.Editable = 'off';
             app.Pressure1_EditField_Avg.HorizontalAlignment = 'center';
             app.Pressure1_EditField_Avg.Tooltip = {'Graph label for this sensor (changes legend entry).'};
-            app.Pressure1_EditField_Avg.Position = [174 77 85 22];
+            app.Pressure1_EditField_Avg.Position = [174 91 85 22];
+            app.Pressure1_EditField_Avg.Value = '0';
 
             % Create Pressure2_EditField_Avg
-            app.Pressure2_EditField_Avg = uieditfield(app.Panel, 'text');
+            app.Pressure2_EditField_Avg = uieditfield(app.PressureDetailsPanel, 'text');
+            app.Pressure2_EditField_Avg.Editable = 'off';
             app.Pressure2_EditField_Avg.HorizontalAlignment = 'center';
             app.Pressure2_EditField_Avg.Tooltip = {'Graph label for this sensor (changes legend entry).'};
-            app.Pressure2_EditField_Avg.Position = [174 45 85 22];
+            app.Pressure2_EditField_Avg.Position = [174 59 85 22];
+            app.Pressure2_EditField_Avg.Value = '0';
 
             % Create Pressure3_EditField_Avg
-            app.Pressure3_EditField_Avg = uieditfield(app.Panel, 'text');
+            app.Pressure3_EditField_Avg = uieditfield(app.PressureDetailsPanel, 'text');
+            app.Pressure3_EditField_Avg.Editable = 'off';
             app.Pressure3_EditField_Avg.HorizontalAlignment = 'center';
             app.Pressure3_EditField_Avg.Tooltip = {'Graph label for this sensor (changes legend entry).'};
-            app.Pressure3_EditField_Avg.Position = [174 15 85 22];
+            app.Pressure3_EditField_Avg.Position = [174 29 85 22];
+            app.Pressure3_EditField_Avg.Value = '0';
 
-            % Create Panel_2
-            app.Panel_2 = uipanel(app.MainTab);
-            app.Panel_2.Enable = 'off';
-            app.Panel_2.BackgroundColor = [0.7686 0.8314 0.7608];
-            app.Panel_2.FontWeight = 'bold';
-            app.Panel_2.Position = [775 47 448 97];
+            % Create Pressure_ResetAllTargetButton
+            app.Pressure_ResetAllTargetButton = uibutton(app.PressureDetailsPanel, 'push');
+            app.Pressure_ResetAllTargetButton.ButtonPushedFcn = createCallbackFcn(app, @Pressure_ResetAllTargetButtonPushed, true);
+            app.Pressure_ResetAllTargetButton.BackgroundColor = [0.902 0.902 0.902];
+            app.Pressure_ResetAllTargetButton.FontSize = 8;
+            app.Pressure_ResetAllTargetButton.Position = [120 8 47 15];
+            app.Pressure_ResetAllTargetButton.Text = 'Reset All';
+
+            % Create Pressure_ResetAllLabelButton
+            app.Pressure_ResetAllLabelButton = uibutton(app.PressureDetailsPanel, 'push');
+            app.Pressure_ResetAllLabelButton.ButtonPushedFcn = createCallbackFcn(app, @Pressure_ResetAllLabelButtonPushed, true);
+            app.Pressure_ResetAllLabelButton.BackgroundColor = [0.902 0.902 0.902];
+            app.Pressure_ResetAllLabelButton.FontSize = 8;
+            app.Pressure_ResetAllLabelButton.Position = [269 8 62 15];
+            app.Pressure_ResetAllLabelButton.Text = 'Reset All';
+
+            % Create Pressure_ResetAllSHOButton
+            app.Pressure_ResetAllSHOButton = uibutton(app.PressureDetailsPanel, 'push');
+            app.Pressure_ResetAllSHOButton.ButtonPushedFcn = createCallbackFcn(app, @Pressure_ResetAllSHOButtonPushed, true);
+            app.Pressure_ResetAllSHOButton.BackgroundColor = [0.902 0.902 0.902];
+            app.Pressure_ResetAllSHOButton.FontSize = 8;
+            app.Pressure_ResetAllSHOButton.Position = [340 8 43 15];
+            app.Pressure_ResetAllSHOButton.Text = 'Reset All';
+
+            % Create FlowDetailsPanel
+            app.FlowDetailsPanel = uipanel(app.MainTab);
+            app.FlowDetailsPanel.Enable = 'off';
+            app.FlowDetailsPanel.BackgroundColor = [0.7686 0.8314 0.7608];
+            app.FlowDetailsPanel.FontWeight = 'bold';
+            app.FlowDetailsPanel.Position = [775 50 448 112];
 
             % Create Label_6
-            app.Label_6 = uilabel(app.Panel_2);
+            app.Label_6 = uilabel(app.FlowDetailsPanel);
             app.Label_6.FontSize = 18;
             app.Label_6.FontWeight = 'bold';
-            app.Label_6.Position = [110 45 25 23];
+            app.Label_6.Position = [110 60 25 23];
             app.Label_6.Text = '';
 
-            % Create Flow1_SetPoint
-            app.Flow1_SetPoint = uieditfield(app.Panel_2, 'numeric');
-            app.Flow1_SetPoint.Limits = [0 Inf];
-            app.Flow1_SetPoint.ValueChangedFcn = createCallbackFcn(app, @Flow1_SetPointValueChanged, true);
-            app.Flow1_SetPoint.HorizontalAlignment = 'center';
-            app.Flow1_SetPoint.Tooltip = {'Target value for PID control'};
-            app.Flow1_SetPoint.Position = [161 44 44 22];
+            % Create Flow1_EditField_Target
+            app.Flow1_EditField_Target = uieditfield(app.FlowDetailsPanel, 'numeric');
+            app.Flow1_EditField_Target.Limits = [0 Inf];
+            app.Flow1_EditField_Target.ValueChangedFcn = createCallbackFcn(app, @Flow1_EditField_TargetValueChanged, true);
+            app.Flow1_EditField_Target.HorizontalAlignment = 'center';
+            app.Flow1_EditField_Target.Tooltip = {'Target value for PID control'};
+            app.Flow1_EditField_Target.Position = [161 59 44 22];
 
-            % Create Flow2_SetPoint
-            app.Flow2_SetPoint = uieditfield(app.Panel_2, 'numeric');
-            app.Flow2_SetPoint.Limits = [0 Inf];
-            app.Flow2_SetPoint.ValueChangedFcn = createCallbackFcn(app, @Flow2_SetPointValueChanged, true);
-            app.Flow2_SetPoint.HorizontalAlignment = 'center';
-            app.Flow2_SetPoint.Tooltip = {'Target value for PID control'};
-            app.Flow2_SetPoint.Position = [161 13 44 22];
+            % Create Flow2_EditField_Target
+            app.Flow2_EditField_Target = uieditfield(app.FlowDetailsPanel, 'numeric');
+            app.Flow2_EditField_Target.Limits = [0 Inf];
+            app.Flow2_EditField_Target.ValueChangedFcn = createCallbackFcn(app, @Flow2_EditField_TargetValueChanged, true);
+            app.Flow2_EditField_Target.HorizontalAlignment = 'center';
+            app.Flow2_EditField_Target.Tooltip = {'Target value for PID control'};
+            app.Flow2_EditField_Target.Position = [161 28 44 22];
 
             % Create CurrentLabel_2
-            app.CurrentLabel_2 = uilabel(app.Panel_2);
-            app.CurrentLabel_2.Position = [106 66 45 22];
+            app.CurrentLabel_2 = uilabel(app.FlowDetailsPanel);
+            app.CurrentLabel_2.Position = [106 81 45 22];
             app.CurrentLabel_2.Text = 'Current';
 
             % Create TargetLabel_2
-            app.TargetLabel_2 = uilabel(app.Panel_2);
+            app.TargetLabel_2 = uilabel(app.FlowDetailsPanel);
             app.TargetLabel_2.HorizontalAlignment = 'center';
-            app.TargetLabel_2.Position = [161 66 44 22];
+            app.TargetLabel_2.Position = [161 81 44 22];
             app.TargetLabel_2.Text = 'Target';
 
             % Create Label_7
-            app.Label_7 = uilabel(app.Panel_2);
+            app.Label_7 = uilabel(app.FlowDetailsPanel);
             app.Label_7.HorizontalAlignment = 'center';
             app.Label_7.FontWeight = 'bold';
-            app.Label_7.Position = [60 45 25 22];
+            app.Label_7.Position = [60 60 25 22];
             app.Label_7.Text = '1';
 
             % Create Flow1_EditField_Current
-            app.Flow1_EditField_Current = uieditfield(app.Panel_2, 'numeric');
+            app.Flow1_EditField_Current = uieditfield(app.FlowDetailsPanel, 'numeric');
             app.Flow1_EditField_Current.Editable = 'off';
             app.Flow1_EditField_Current.HorizontalAlignment = 'center';
             app.Flow1_EditField_Current.Tooltip = {'Current flow reading (L/min) for flow sensor 1 (see label on sensor).'};
-            app.Flow1_EditField_Current.Position = [107 44 43 22];
+            app.Flow1_EditField_Current.Position = [107 59 43 22];
 
             % Create Label_8
-            app.Label_8 = uilabel(app.Panel_2);
+            app.Label_8 = uilabel(app.FlowDetailsPanel);
             app.Label_8.HorizontalAlignment = 'center';
             app.Label_8.FontWeight = 'bold';
-            app.Label_8.Position = [60 13 25 22];
+            app.Label_8.Position = [60 28 25 22];
             app.Label_8.Text = '2';
 
             % Create Flow2_EditField_Current
-            app.Flow2_EditField_Current = uieditfield(app.Panel_2, 'numeric');
+            app.Flow2_EditField_Current = uieditfield(app.FlowDetailsPanel, 'numeric');
             app.Flow2_EditField_Current.Editable = 'off';
             app.Flow2_EditField_Current.HorizontalAlignment = 'center';
             app.Flow2_EditField_Current.Tooltip = {'Current flow reading (L/min) for flow sensor 2 (see label on sensor).'};
-            app.Flow2_EditField_Current.Position = [107 13 43 22];
+            app.Flow2_EditField_Current.Position = [107 28 43 22];
 
             % Create Flow2_GraphEnable
-            app.Flow2_GraphEnable = uicheckbox(app.Panel_2);
+            app.Flow2_GraphEnable = uicheckbox(app.FlowDetailsPanel);
             app.Flow2_GraphEnable.Text = '';
-            app.Flow2_GraphEnable.Position = [378 13 15 22];
+            app.Flow2_GraphEnable.Position = [378 28 15 22];
             app.Flow2_GraphEnable.Value = true;
 
             % Create Flow1_GraphEnable
-            app.Flow1_GraphEnable = uicheckbox(app.Panel_2);
+            app.Flow1_GraphEnable = uicheckbox(app.FlowDetailsPanel);
             app.Flow1_GraphEnable.Text = '';
-            app.Flow1_GraphEnable.Position = [378 42 14 22];
+            app.Flow1_GraphEnable.Position = [378 57 14 22];
             app.Flow1_GraphEnable.Value = true;
 
             % Create Label_10
-            app.Label_10 = uilabel(app.Panel_2);
+            app.Label_10 = uilabel(app.FlowDetailsPanel);
             app.Label_10.HorizontalAlignment = 'center';
             app.Label_10.FontSize = 18;
-            app.Label_10.Position = [370 66 30 23];
+            app.Label_10.Position = [370 81 30 23];
             app.Label_10.Text = '👁️';
 
             % Create SensorLabel_2
-            app.SensorLabel_2 = uilabel(app.Panel_2);
+            app.SensorLabel_2 = uilabel(app.FlowDetailsPanel);
             app.SensorLabel_2.HorizontalAlignment = 'center';
             app.SensorLabel_2.FontWeight = 'bold';
-            app.SensorLabel_2.Position = [50 67 45 22];
+            app.SensorLabel_2.Position = [50 82 45 22];
             app.SensorLabel_2.Text = 'Sensor';
 
             % Create Flow2_LabelField
-            app.Flow2_LabelField = uieditfield(app.Panel_2, 'text');
+            app.Flow2_LabelField = uieditfield(app.FlowDetailsPanel, 'text');
             app.Flow2_LabelField.ValueChangedFcn = createCallbackFcn(app, @Flow2_LabelFieldValueChanged, true);
             app.Flow2_LabelField.HorizontalAlignment = 'center';
             app.Flow2_LabelField.FontAngle = 'italic';
             app.Flow2_LabelField.Tooltip = {'Graph label for this sensor (changes legend entry).'};
-            app.Flow2_LabelField.Position = [297 13 63 22];
+            app.Flow2_LabelField.Position = [297 28 63 22];
             app.Flow2_LabelField.Value = '2';
 
             % Create Label_9
-            app.Label_9 = uilabel(app.Panel_2);
+            app.Label_9 = uilabel(app.FlowDetailsPanel);
             app.Label_9.HorizontalAlignment = 'center';
-            app.Label_9.Position = [297 66 63 22];
+            app.Label_9.Position = [297 81 63 22];
 
             % Create Flow1_LabelField
-            app.Flow1_LabelField = uieditfield(app.Panel_2, 'text');
+            app.Flow1_LabelField = uieditfield(app.FlowDetailsPanel, 'text');
             app.Flow1_LabelField.ValueChangedFcn = createCallbackFcn(app, @Flow1_LabelFieldValueChanged, true);
             app.Flow1_LabelField.HorizontalAlignment = 'center';
             app.Flow1_LabelField.FontAngle = 'italic';
             app.Flow1_LabelField.Tooltip = {'Graph label for this sensor (changes legend entry).'};
-            app.Flow1_LabelField.Position = [297 43 63 22];
+            app.Flow1_LabelField.Position = [297 58 63 22];
             app.Flow1_LabelField.Value = '1';
 
             % Create AvgSDLabel_2
-            app.AvgSDLabel_2 = uilabel(app.Panel_2);
+            app.AvgSDLabel_2 = uilabel(app.FlowDetailsPanel);
             app.AvgSDLabel_2.HorizontalAlignment = 'center';
-            app.AvgSDLabel_2.Position = [215 65 72 22];
+            app.AvgSDLabel_2.Position = [215 80 72 22];
             app.AvgSDLabel_2.Text = 'Avg ± SD';
 
             % Create Flow1_EditField_Avg
-            app.Flow1_EditField_Avg = uieditfield(app.Panel_2, 'text');
+            app.Flow1_EditField_Avg = uieditfield(app.FlowDetailsPanel, 'text');
+            app.Flow1_EditField_Avg.Editable = 'off';
             app.Flow1_EditField_Avg.HorizontalAlignment = 'center';
             app.Flow1_EditField_Avg.Tooltip = {'Graph label for this sensor (changes legend entry).'};
-            app.Flow1_EditField_Avg.Position = [217 43 72 22];
+            app.Flow1_EditField_Avg.Position = [217 58 72 22];
+            app.Flow1_EditField_Avg.Value = '0';
 
             % Create Flow2_EditField_Avg
-            app.Flow2_EditField_Avg = uieditfield(app.Panel_2, 'text');
+            app.Flow2_EditField_Avg = uieditfield(app.FlowDetailsPanel, 'text');
+            app.Flow2_EditField_Avg.Editable = 'off';
             app.Flow2_EditField_Avg.HorizontalAlignment = 'center';
             app.Flow2_EditField_Avg.Tooltip = {'Graph label for this sensor (changes legend entry).'};
-            app.Flow2_EditField_Avg.Position = [217 13 72 22];
+            app.Flow2_EditField_Avg.Position = [217 28 72 22];
+            app.Flow2_EditField_Avg.Value = '0';
+
+            % Create Flow_ResetAllTargetButton
+            app.Flow_ResetAllTargetButton = uibutton(app.FlowDetailsPanel, 'push');
+            app.Flow_ResetAllTargetButton.ButtonPushedFcn = createCallbackFcn(app, @Flow_ResetAllTargetButtonPushed, true);
+            app.Flow_ResetAllTargetButton.BackgroundColor = [0.902 0.902 0.902];
+            app.Flow_ResetAllTargetButton.FontSize = 8;
+            app.Flow_ResetAllTargetButton.Position = [159 7 47 15];
+            app.Flow_ResetAllTargetButton.Text = 'Reset All';
+
+            % Create Flow_ResetAllLabelButton
+            app.Flow_ResetAllLabelButton = uibutton(app.FlowDetailsPanel, 'push');
+            app.Flow_ResetAllLabelButton.ButtonPushedFcn = createCallbackFcn(app, @Flow_ResetAllLabelButtonPushed, true);
+            app.Flow_ResetAllLabelButton.BackgroundColor = [0.902 0.902 0.902];
+            app.Flow_ResetAllLabelButton.FontSize = 8;
+            app.Flow_ResetAllLabelButton.Position = [298 7 62 15];
+            app.Flow_ResetAllLabelButton.Text = 'Reset All';
 
             % Create PressureGraphPanel
             app.PressureGraphPanel = uipanel(app.MainTab);
             app.PressureGraphPanel.BorderColor = [0.4902 0.4902 0.4902];
+            app.PressureGraphPanel.Enable = 'off';
             app.PressureGraphPanel.BackgroundColor = [0.8392 0.8314 0.8588];
             app.PressureGraphPanel.FontAngle = 'italic';
-            app.PressureGraphPanel.Position = [330 152 435 329];
+            app.PressureGraphPanel.Position = [330 168 435 329];
 
             % Create PressureAxes
             app.PressureAxes = uiaxes(app.PressureGraphPanel);
@@ -1726,7 +1882,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.PumpControlPanel.Title = 'Pump Control';
             app.PumpControlPanel.BackgroundColor = [0.902 0.902 0.902];
             app.PumpControlPanel.FontWeight = 'bold';
-            app.PumpControlPanel.Position = [17 171 302 150];
+            app.PumpControlPanel.Position = [17 189 302 150];
 
             % Create PumpPowerSliderLabel
             app.PumpPowerSliderLabel = uilabel(app.PumpControlPanel);
@@ -1753,7 +1909,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.ControlModeSwitch = uiswitch(app.PumpControlPanel, 'slider');
             app.ControlModeSwitch.Items = {'Manual', 'Auto'};
             app.ControlModeSwitch.ValueChangedFcn = createCallbackFcn(app, @ControlModeSwitchValueChanged, true);
-            app.ControlModeSwitch.Tooltip = {'Manual - control pump power using the slider below'; ''; 'Auto - Input a flow or puressure setpoint in the panels above and the system will automatically adjust'};
+            app.ControlModeSwitch.Tooltip = {'Manual - control pump power using the slider below'; ''; 'Auto - Input a flow or pressure target value in the appropriate box underneath the graphs, and the system will automatically adjust'};
             app.ControlModeSwitch.Position = [192 92 45 20];
             app.ControlModeSwitch.Value = 'Manual';
 
@@ -1766,8 +1922,9 @@ classdef CCTA_exported < matlab.apps.AppBase
 
             % Create FlowGraphPanel
             app.FlowGraphPanel = uipanel(app.MainTab);
+            app.FlowGraphPanel.Enable = 'off';
             app.FlowGraphPanel.BackgroundColor = [0.7725 0.8314 0.7569];
-            app.FlowGraphPanel.Position = [775 152 448 329];
+            app.FlowGraphPanel.Position = [775 168 448 329];
 
             % Create FlowAxes
             app.FlowAxes = uiaxes(app.FlowGraphPanel);
@@ -1796,10 +1953,11 @@ classdef CCTA_exported < matlab.apps.AppBase
             % Create OptionsPanel
             app.OptionsPanel = uipanel(app.MainTab);
             app.OptionsPanel.BorderWidth = 0;
-            app.OptionsPanel.Position = [13 328 305 88];
+            app.OptionsPanel.Position = [13 346 305 88];
 
             % Create PauseGraphsButton
             app.PauseGraphsButton = uibutton(app.OptionsPanel, 'state');
+            app.PauseGraphsButton.ValueChangedFcn = createCallbackFcn(app, @PauseGraphsButtonValueChanged, true);
             app.PauseGraphsButton.Enable = 'off';
             app.PauseGraphsButton.Icon = fullfile(pathToMLAPP, 'assets', 'pause_icon.png');
             app.PauseGraphsButton.Text = 'Pause Graphs';
@@ -1850,7 +2008,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.ConnectionDropDownLabel.FontSize = 18;
             app.ConnectionDropDownLabel.FontWeight = 'bold';
             app.ConnectionDropDownLabel.FontColor = [0.149 0.149 0.149];
-            app.ConnectionDropDownLabel.Position = [18 484 104 23];
+            app.ConnectionDropDownLabel.Position = [18 502 104 23];
             app.ConnectionDropDownLabel.Text = 'Connection';
 
             % Create ConnectionDropDown
@@ -1860,12 +2018,12 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.ConnectionDropDown.FontWeight = 'bold';
             app.ConnectionDropDown.FontColor = [0.149 0.149 0.149];
             app.ConnectionDropDown.BackgroundColor = [0.9412 0.9412 0.9412];
-            app.ConnectionDropDown.Position = [17 449 126 31];
+            app.ConnectionDropDown.Position = [17 467 126 31];
             app.ConnectionDropDown.Value = {};
 
             % Create ConnectedLamp
             app.ConnectedLamp = uilamp(app.MainTab);
-            app.ConnectedLamp.Position = [295 455 20 20];
+            app.ConnectedLamp.Position = [295 473 20 20];
             app.ConnectedLamp.Color = [1 0 0];
 
             % Create RefreshConnectionsButton
@@ -1876,18 +2034,18 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.RefreshConnectionsButton.FontSize = 14;
             app.RefreshConnectionsButton.FontWeight = 'bold';
             app.RefreshConnectionsButton.FontColor = [0.149 0.149 0.149];
-            app.RefreshConnectionsButton.Position = [255 450 31 32];
+            app.RefreshConnectionsButton.Position = [255 468 31 32];
             app.RefreshConnectionsButton.Text = '';
 
             % Create ConnectDisconnectButton
             app.ConnectDisconnectButton = uibutton(app.MainTab, 'push');
             app.ConnectDisconnectButton.ButtonPushedFcn = createCallbackFcn(app, @ConnectDisconnectButtonPushed, true);
-            app.ConnectDisconnectButton.BackgroundColor = [1 0 0];
+            app.ConnectDisconnectButton.BackgroundColor = [0.9412 0.9412 0.9412];
             app.ConnectDisconnectButton.FontSize = 14;
             app.ConnectDisconnectButton.FontWeight = 'bold';
             app.ConnectDisconnectButton.FontColor = [0.149 0.149 0.149];
             app.ConnectDisconnectButton.Enable = 'off';
-            app.ConnectDisconnectButton.Position = [149 450 98 31];
+            app.ConnectDisconnectButton.Position = [149 468 98 31];
             app.ConnectDisconnectButton.Text = 'Connect';
 
             % Create OptionsLabel
@@ -1896,13 +2054,13 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.OptionsLabel.FontWeight = 'bold';
             app.OptionsLabel.FontColor = [0.149 0.149 0.149];
             app.OptionsLabel.Enable = 'off';
-            app.OptionsLabel.Position = [20 410 73 23];
+            app.OptionsLabel.Position = [20 428 73 23];
             app.OptionsLabel.Text = 'Options';
 
             % Create PressureDataTitleLabelPanel
             app.PressureDataTitleLabelPanel = uipanel(app.MainTab);
             app.PressureDataTitleLabelPanel.Enable = 'off';
-            app.PressureDataTitleLabelPanel.Position = [330 484 435 30];
+            app.PressureDataTitleLabelPanel.Position = [330 502 435 30];
 
             % Create PressureDataTitleLabel
             app.PressureDataTitleLabel = uilabel(app.PressureDataTitleLabelPanel);
@@ -1916,7 +2074,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             % Create FlowDataTitleLabelPanel
             app.FlowDataTitleLabelPanel = uipanel(app.MainTab);
             app.FlowDataTitleLabelPanel.Enable = 'off';
-            app.FlowDataTitleLabelPanel.Position = [775 484 448 30];
+            app.FlowDataTitleLabelPanel.Position = [775 502 448 30];
 
             % Create FlowDataTitleLabel
             app.FlowDataTitleLabel = uilabel(app.FlowDataTitleLabelPanel);
@@ -1936,7 +2094,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.PIDCoefficientsPanel.Enable = 'off';
             app.PIDCoefficientsPanel.Title = 'PID Coefficients';
             app.PIDCoefficientsPanel.FontWeight = 'bold';
-            app.PIDCoefficientsPanel.Position = [17 365 469 139];
+            app.PIDCoefficientsPanel.Position = [17 383 469 139];
 
             % Create PressureCoefficientsPanel
             app.PressureCoefficientsPanel = uipanel(app.PIDCoefficientsPanel);
@@ -2044,7 +2202,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.DeveloperOptionsPanel = uipanel(app.SettingsTab);
             app.DeveloperOptionsPanel.Title = 'Developer Options';
             app.DeveloperOptionsPanel.FontWeight = 'bold';
-            app.DeveloperOptionsPanel.Position = [499 365 260 140];
+            app.DeveloperOptionsPanel.Position = [499 383 260 140];
 
             % Create SimulateDataCheckBox
             app.SimulateDataCheckBox = uicheckbox(app.DeveloperOptionsPanel);
@@ -2057,7 +2215,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.CurrentPumpAnalogWriteValue0255EditFieldLabel = uilabel(app.SettingsTab);
             app.CurrentPumpAnalogWriteValue0255EditFieldLabel.HorizontalAlignment = 'right';
             app.CurrentPumpAnalogWriteValue0255EditFieldLabel.FontWeight = 'bold';
-            app.CurrentPumpAnalogWriteValue0255EditFieldLabel.Position = [773 472 201 30];
+            app.CurrentPumpAnalogWriteValue0255EditFieldLabel.Position = [773 490 201 30];
             app.CurrentPumpAnalogWriteValue0255EditFieldLabel.Text = {'Current Pump Analog Write Value '; '(0-255)'};
 
             % Create CurrentPumpAnalogWriteValueEditField
@@ -2066,12 +2224,12 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.CurrentPumpAnalogWriteValueEditField.RoundFractionalValues = 'on';
             app.CurrentPumpAnalogWriteValueEditField.ValueChangedFcn = createCallbackFcn(app, @CurrentPumpAnalogWriteValueEditFieldValueChanged, true);
             app.CurrentPumpAnalogWriteValueEditField.Editable = 'off';
-            app.CurrentPumpAnalogWriteValueEditField.Position = [989 480 66 22];
+            app.CurrentPumpAnalogWriteValueEditField.Position = [989 498 66 22];
 
             % Create OtherSettingsPanel
             app.OtherSettingsPanel = uipanel(app.SettingsTab);
             app.OtherSettingsPanel.Title = 'Other Settings';
-            app.OtherSettingsPanel.Position = [17 279 469 73];
+            app.OtherSettingsPanel.Position = [17 297 469 73];
 
             % Create CalibrationdurationsEditFieldLabel
             app.CalibrationdurationsEditFieldLabel = uilabel(app.OtherSettingsPanel);
@@ -2093,7 +2251,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             % Create HTML
             app.HTML = uihtml(app.HelpTab);
             app.HTML.HTMLSource = './assets/help.html';
-            app.HTML.Position = [16 51 1201 456];
+            app.HTML.Position = [16 69 1201 456];
 
             % Show the figure after all components are created
             app.UIFigure.Visible = 'on';
