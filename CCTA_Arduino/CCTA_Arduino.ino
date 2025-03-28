@@ -297,9 +297,8 @@ float interpolatePressure(float adc_value, int sensor) {
   static const float voltage_V2[14] = { 16, 98, 193, 258, 340, 423, 495, 596, 690, 763, 846, 915, 937, 939 };
   static const float pressure_mmHg2[14] = { 0, 10.5, 21.7, 29.2, 39.7, 49.5, 58.5, 70.5, 82.5, 90.7, 102, 111, 123.7, 135 };
 
-  // Copied from sensor 2, should recalibrate it
-  static const float voltage_V3[8] = { 117, 175, 363, 576, 700, 856, 960, 967 };
-  static const float pressure_mmHg3[8] = { 2.2, 24.0, 48.7, 75.0, 91.5, 111.0, 128.2, 151.5 };
+  static const float voltage_V3[14] = { 9, 40, 118, 218, 310, 425, 502, 595, 705, 780, 890, 963, 971, 977};
+  static const float pressure_mmHg3[14] = { 1.5, 10.5, 20.2, 31.5, 42.7, 56.2, 65.2, 75.7, 88.5, 97.5, 111, 122.2, 135, 153};
 
   // Select calibration curve
   if (sensor == 1) {
@@ -313,22 +312,26 @@ float interpolatePressure(float adc_value, int sensor) {
   } else {
     voltage_V = voltage_V3;
     pressure_mmHg = pressure_mmHg3;
-    size = 8;
+    size = 14;
   }
 
+  // Extrapolate below curve (using first two data points)
   if (adc_value <= voltage_V[0]) {
     return pressure_mmHg[0] + (adc_value - voltage_V[0]) * (pressure_mmHg[1] - pressure_mmHg[0]) / (voltage_V[1] - voltage_V[0]);
   }
+
+  // Extrapolate above curve (using last two data points)
   if (adc_value >= voltage_V[size - 1]) {
     return pressure_mmHg[size - 2] + (adc_value - voltage_V[size - 2]) * (pressure_mmHg[size - 1] - pressure_mmHg[size - 2]) / (voltage_V[size - 1] - voltage_V[size - 2]);
   }
 
+  // Interpolate within curve
   for (int i = 0; i < size - 1; i++) {
     if (adc_value >= voltage_V[i] && adc_value <= voltage_V[i + 1]) {
       return pressure_mmHg[i] + (adc_value - voltage_V[i]) * (pressure_mmHg[i + 1] - pressure_mmHg[i]) / (voltage_V[i + 1] - voltage_V[i]);
     }
   }
-  return -999;
+  return -999;  // Error value
 }
 
 
