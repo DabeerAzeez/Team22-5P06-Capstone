@@ -3,7 +3,7 @@ classdef CCTA_exported < matlab.apps.AppBase
     % Properties that correspond to app components
     properties (Access = public)
         UIFigure                       matlab.ui.Figure
-        TabGroup2                      matlab.ui.container.TabGroup
+        MainTabGroup                   matlab.ui.container.TabGroup
         MainTab                        matlab.ui.container.Tab
         FlowDataTitleLabelPanel        matlab.ui.container.Panel
         FlowDataTitleLabel             matlab.ui.control.Label
@@ -24,6 +24,7 @@ classdef CCTA_exported < matlab.apps.AppBase
         FlowAxesWaitingForConnectionLabel  matlab.ui.control.Label
         FlowAxes                       matlab.ui.control.UIAxes
         PumpControlPanel               matlab.ui.container.Panel
+        PumpPowerSpinner               matlab.ui.control.Spinner
         StartPulsatileFlowButton       matlab.ui.control.StateButton
         ControlModeSwitch              matlab.ui.control.Switch
         ControlModeSwitchLabel         matlab.ui.control.Label
@@ -33,11 +34,11 @@ classdef CCTA_exported < matlab.apps.AppBase
         PressureAxesWaitingForConnectionLabel  matlab.ui.control.Label
         PressureAxes                   matlab.ui.control.UIAxes
         FlowDetailsPanel               matlab.ui.container.Panel
+        Flow1_EditField_Avg            matlab.ui.control.EditField
         Flow_ResetAllLabelButton       matlab.ui.control.Button
         Flow_ResetAllTargetButton      matlab.ui.control.Button
         Flow2_EditField_Avg            matlab.ui.control.EditField
-        Flow1_EditField_Avg            matlab.ui.control.EditField
-        AvgSDLabel_2                   matlab.ui.control.Label
+        RollAvgSDLabel_2               matlab.ui.control.Label
         Flow1_LabelField               matlab.ui.control.EditField
         Label_9                        matlab.ui.control.Label
         Flow2_LabelField               matlab.ui.control.EditField
@@ -61,7 +62,7 @@ classdef CCTA_exported < matlab.apps.AppBase
         Pressure3_EditField_Avg        matlab.ui.control.EditField
         Pressure2_EditField_Avg        matlab.ui.control.EditField
         Pressure1_EditField_Avg        matlab.ui.control.EditField
-        AvgSDLabel                     matlab.ui.control.Label
+        RollAvgSDLabel                 matlab.ui.control.Label
         Pressure3_EditField_SHO        matlab.ui.control.NumericEditField
         Pressure2_EditField_SHO        matlab.ui.control.NumericEditField
         Pressure1_EditField_SHO        matlab.ui.control.NumericEditField
@@ -88,11 +89,13 @@ classdef CCTA_exported < matlab.apps.AppBase
         Pressure1_EditField_Target     matlab.ui.control.NumericEditField
         SettingsTab                    matlab.ui.container.Tab
         OtherSettingsPanel             matlab.ui.container.Panel
+        RollingaveragedurationEditField  matlab.ui.control.NumericEditField
+        RollingaveragedurationEditFieldLabel  matlab.ui.control.Label
         CalibrationdurationsEditField  matlab.ui.control.NumericEditField
         CalibrationdurationsEditFieldLabel  matlab.ui.control.Label
         CurrentPumpAnalogWriteValueEditField  matlab.ui.control.NumericEditField
-        CurrentPumpAnalogWriteValue0255EditFieldLabel  matlab.ui.control.Label
-        DeveloperOptionsPanel          matlab.ui.container.Panel
+        CurrentPumpAnalogWriteValue0255Label  matlab.ui.control.Label
+        DeveloperToolsPanel            matlab.ui.container.Panel
         SimulateDataCheckBox           matlab.ui.control.CheckBox
         PIDCoefficientsPanel           matlab.ui.container.Panel
         FlowCoefficientsPanel          matlab.ui.container.Panel
@@ -118,21 +121,30 @@ classdef CCTA_exported < matlab.apps.AppBase
     % TODO: Add "refresh ports" button
 
     properties (Access = private)
+        % Constants
         plot_raw_data = true;
         F_REFRESH = 20;  % App refresh rate (Hz)
         ARDUINO_ANALOGWRITE_MAX = 255;
         ARDUINO_SERIAL_BITRATE = 115200;
-        PID_ERRORS_LENGTH = 100;  % # of error values to use for PID integral calculations
-        CALIBRATION_DURATION = 30;
+        PID_ERRORS_LENGTH = 75;  % # of error values to use for PID integral calculations, determined empirically to minimize settling time
+        CALIBRATION_DURATION = 20;
+        ROLLING_AVERAGE_DURATION = 10;  % # of seconds for rolling average
+        PUMP_LOW_POWER = 15;
+        DT_PID = 0.1;  % Time step for integral/derivative PID calculations (adjust based on system response)
 
         % Colors
-        PRESSURE_COLOR = [0.84 0.83 0.86];
+        COLOR_PRESSURE = [0.84 0.83 0.86];
+        COLOR_PRESSURE_2 = [161, 138, 219]./255;
         FLOW_COLOR = [0.77,0.83,0.76];
         BUTTON_COLOR_DEFAULT = [0.94,0.94,0.94];
         BUTTON_COLOR1 = [0.16,0.57,0.84];
         DISABLED_COLOR = [0.5 0.5 0.5];
         COLOR_DISCONNECTED = [1.00,0.00,0.00];
         COLOR_CONNECTED = [0, 1, 0];
+        COLOR_ERROR = [255, 161, 130]./255;
+        COLOR_WARNING = [255, 190, 130]./255;
+        COLOR_NORMAL = [1 1 1];
+        COLOR_EDITFIELD_DIMMED = [0.75 0.75 0.75];
 
         appDir;
 
@@ -152,20 +164,21 @@ classdef CCTA_exported < matlab.apps.AppBase
         pressure_vals3 = [];
 
         % PID Variables
-        DT_PID = 0.1;  % Time step (adjust based on system response)
-
-        Kp_flow = 1;  % PID coefficients when controlling flow
-        Ki_flow = 0;
+        Kp_flow = 5;  % PID coefficients when controlling flow
+        Ki_flow = 0.5;  % Default values defined here
         Kd_flow = 0;
 
-        Kp_pressure = 2;  % PID coefficients when controlling pressure
-        Ki_pressure = 0;
-        Kd_pressure = 0;
+        Kp_pressure = 0.2;  % PID coefficients when controlling pressure
+        Ki_pressure = 0.1;  % Default values defined here
+        Kd_pressure = 0.05;
 
-        lastFlowDutyCycle = 128;  % for comparisons
-        flowDutyCycle = 128;  % Initialize halfway
+        lastFlowDutyCycle = 0;  % for comparisons
+        flowDutyCycle = 0;  % Initialize halfway
         PumpControlMode = 'Manual';
 
+        % Other variables
+
+        rollingAverageCutoffTime;
 
         pulsatileFlowEnabled = false;
         pulsatileFlowValues = [0, 6.8, 4.7, 3.5, 4.7, 5.8, 2.5, 0].*0.7647;  % from Johnson et. al (https://pmc.ncbi.nlm.nih.gov/articles/PMC8757711/#s9), scaled to max ~5 L/min for current pump
@@ -202,15 +215,13 @@ classdef CCTA_exported < matlab.apps.AppBase
         end
     end
 
-    methods (Static)
-        function dimEditFieldTemporarily(editField)
-            editField.BackgroundColor = [0.9, 0.9, 0.9];
-            pause(0.5);
-            editField.BackgroundColor = [1 1 1];
-        end
-    end
-
     methods (Access = private)
+
+        function dimEditFieldTemporarily(app, editField)
+            editField.BackgroundColor = app.COLOR_EDITFIELD_DIMMED;
+            pause(0.5);
+            editField.BackgroundColor = app.COLOR_NORMAL;
+        end
 
         function [t, newFlowIndicator, flow_value1, ...
                 flow_value2, pressure_value_raw1, ...
@@ -386,24 +397,43 @@ classdef CCTA_exported < matlab.apps.AppBase
                 app.pressure_vals2 = [app.pressure_vals2 pressure_value2];
                 app.pressure_vals3 = [app.pressure_vals3 pressure_value3];
 
-                % Update Edit Fields
+                % Update Edit Field Values
                 app.Pressure1_EditField_Current.Value = pressure_value1;
                 app.Pressure2_EditField_Current.Value = pressure_value2;
                 app.Pressure3_EditField_Current.Value = pressure_value3;
                 app.Flow1_EditField_Current.Value = flow_value1;
                 app.Flow2_EditField_Current.Value = flow_value2;
 
-                app.Pressure1_EditField_Avg.Value = sprintf("%.2f ± %.1f", mean(app.pressure_vals1), std(app.pressure_vals1));
-                app.Pressure2_EditField_Avg.Value = sprintf("%.2f ± %.1f", mean(app.pressure_vals2), std(app.pressure_vals2));
-                app.Pressure3_EditField_Avg.Value = sprintf("%.2f ± %.1f", mean(app.pressure_vals3), std(app.pressure_vals3));
+                % Update edit field background colors if pressure/flow
+                % values are negative
+                fields = {
+                    'Pressure1', pressure_value1;
+                    'Pressure2', pressure_value2;
+                    'Pressure3', pressure_value3;
+                    'Flow1',     flow_value1;
+                    'Flow2',     flow_value2
+                    };
 
-                app.Flow1_EditField_Avg.Value = sprintf("%.2f ± %.1f", mean(app.flow_vals1), std(app.flow_vals1));
-                app.Flow2_EditField_Avg.Value = sprintf("%.2f ± %.1f", mean(app.flow_vals2), std(app.flow_vals2));
+                for i = 1:size(fields, 1)
+                    name = fields{i, 1};
+                    val  = fields{i, 2};
+                    fieldHandle = app.([name '_EditField_Current']);
+                    fieldHandle.Value = val;
+                    if val < 0
+                        fieldHandle.BackgroundColor = app.COLOR_ERROR;
+                    else
+                        fieldHandle.BackgroundColor = app.COLOR_NORMAL;
+                    end
+                end
 
+                % Update sensor rolling average values
+                app.updateSensorAverages();
+
+                % Update pressure/flow plots
                 app.updateDataPlots();
 
                 % Update PID if in Auto mode
-                if app.PumpControlMode == "Auto"
+                if app.PumpControlMode == "PID"
                     app.updatePIDOutputs();
                 end
 
@@ -426,58 +456,35 @@ classdef CCTA_exported < matlab.apps.AppBase
 
         function setControlMode(app,mode)
             if lower(mode) == "manual"
+                highlightSetPointUI(app, "None");  % clear any setpoint UI from any prior PID control
                 app.PumpControlMode = "Manual";
                 app.ControlModeSwitch.Value = "Manual";
                 app.ControlModeSwitch.Enable = "off";  % to prevent user from switching toggle when they should just input a setpoint
-                highlightSetPointUI(app, "None");
                 app.PumpPowerSlider.Enable = "on";
+                app.PumpPowerSpinner.Enable = "on";
                 app.PID_setpoint_id = "None";
             elseif lower(mode) == "pid"
                 app.PumpControlMode = "PID";
                 app.ControlModeSwitch.Value = "Auto";
                 app.ControlModeSwitch.Enable = "on";
                 app.PumpPowerSlider.Enable = "off";
+                app.PumpPowerSpinner.Enable = "off";
             elseif lower(mode) == "pulsatile"
+                highlightSetPointUI(app, "None");  % clear any setpoint UI from any prior PID control
                 app.PumpControlMode = "Pulsatile";
                 app.ControlModeSwitch.Value = "Auto";
                 app.ControlModeSwitch.Enable = "on";
                 app.PumpPowerSlider.Enable = "off";
+                app.PumpPowerSpinner.Enable = "off";
             elseif lower(mode) == "calibration"
+                highlightSetPointUI(app, "None");  % clear any setpoint UI from any prior PID control
                 app.PumpControlMode = "Calibration";
                 app.ControlModeSwitch.Value = "Auto";
                 app.ControlModeSwitch.Enable = "off";
                 app.PumpPowerSlider.Enable = "off";
+                app.PumpPowerSpinner.Enable = "off";
             else
                 warning("Invalid control mode selected.");
-            end
-        end
-        
-        function sendControlValuesToArduino(app)
-            if lower(app.PumpControlMode) == "auto"
-                % Update control values based on PID algorithm
-                app.flowDutyCycle = app.flowDutyCycle + round(app.PID_output);
-
-                % Place PID output within limits
-                if app.flowDutyCycle > app.ARDUINO_ANALOGWRITE_MAX
-                    app.flowDutyCycle = app.ARDUINO_ANALOGWRITE_MAX;
-                elseif app.flowDutyCycle < 0
-                    app.flowDutyCycle = 0;
-                end
-            elseif lower(app.PumpControlMode) == "manual" || lower(app.PumpControlMode) == "pulsatile"
-                % do nothing
-            else
-                uialert("Invalid pump control mode selected.")
-            end
-
-            % Update flow pump control UI
-            app.CurrentPumpAnalogWriteValueEditField.Value = app.flowDutyCycle;
-            app.PumpPowerSlider.Value = app.flowDutyCycle / app.ARDUINO_ANALOGWRITE_MAX * app.PumpPowerSlider.Limits(2);
-
-            % Send command to Arduino
-            if app.SimulateDataCheckBox.Value == false
-                command = sprintf("PMP: %d",app.flowDutyCycle);
-                writeline(app.arduinoObj,command);
-                app.WaitForArduinoMessage();
             end
         end
         
@@ -522,8 +529,17 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.PID_derivative = (PID_error - PID_prev_error) / app.DT_PID;
             app.PID_output = Kp * PID_error + Ki * app.PID_integral + Kd * app.PID_derivative;
 
-            % Send PID output to Arduino
-            app.sendControlValuesToArduino();
+            % Update control value (flow duty cycle) based on PID algorithm
+            app.flowDutyCycle = app.flowDutyCycle + round(app.PID_output);
+
+            % Place PID output within limits
+            if app.flowDutyCycle > app.ARDUINO_ANALOGWRITE_MAX
+                app.flowDutyCycle = app.ARDUINO_ANALOGWRITE_MAX;
+            elseif app.flowDutyCycle < 0
+                app.flowDutyCycle = 0;
+            end
+
+            app.setPumpPower(app.flowDutyCycle/app.ARDUINO_ANALOGWRITE_MAX*100);
         end
         
         function updateSerialPortList(app)
@@ -586,8 +602,8 @@ classdef CCTA_exported < matlab.apps.AppBase
                 % Get handle to the UI element
                 uiElement = setpoints.(fieldNames{i});
 
-                onColor = [0 1 0];
-                offColor = [1 1 1];
+                onColor = app.COLOR_CONNECTED;
+                offColor = app.COLOR_NORMAL;
 
                 if strcmp(fieldNames{i}, setpointID)
                     if isequal(uiElement.BackgroundColor, onColor)
@@ -655,7 +671,7 @@ classdef CCTA_exported < matlab.apps.AppBase
                 app.PressureDataTitleLabelPanel];
 
             for pressureElement = pressureElements
-                pressureElement.BackgroundColor = app.PRESSURE_COLOR;
+                pressureElement.BackgroundColor = app.COLOR_PRESSURE;
             end
 
             % Color all flow-related elements
@@ -704,6 +720,7 @@ classdef CCTA_exported < matlab.apps.AppBase
 
             % Perform other housekeeping
             app.clearDataArrays();
+            app.setPumpPower(50);  % start at 50% as a signal the system started working, without pushing too much water
             app.startLogging();
             app.isConnected = true;
 
@@ -721,12 +738,14 @@ classdef CCTA_exported < matlab.apps.AppBase
                 'Message', 'Please wait...', ...
                 'Indeterminate', 'on');
 
+            app.setPumpPower(0);  % turn off pump
             app.arduinoObj = [];
             app.ConnectionDropDown.Enable = "on";
             app.RefreshConnectionsButton.Enable = "on";
             app.ConnectDisconnectButton.Text = "Connect";
             app.ConnectedLamp.Color = app.COLOR_DISCONNECTED;
             app.isConnected = false;
+            app.SimulateDataCheckBox.Value = false;  % to allow user to re-select it if they want to simulate again
             app.setGUIEnabled(false);
 
             % Pressure/Flow Values
@@ -779,7 +798,7 @@ classdef CCTA_exported < matlab.apps.AppBase
 
             % Graph formatting based on state
             if state
-                graphColor = [1 1 1];
+                graphColor = app.COLOR_NORMAL;
                 textColor = [0.15, 0.15, 0.15];  % Default text color
                 toolbarVisible = true;
                 waitingText = 'Loading...';
@@ -844,6 +863,8 @@ classdef CCTA_exported < matlab.apps.AppBase
             end
         end
         
+        % cutoffTime - cutoff for rolling average, to be visualized via
+        %              shading on graph
         function updateDataPlots(app)
             % Plot data based on UI selections
             if app.PauseGraphsButton.Value == false && app.isConnected
@@ -859,12 +880,16 @@ classdef CCTA_exported < matlab.apps.AppBase
 
                 lineWidth = 2;
 
-                % Plot pressure data
+                % Collect time values for rolling average shading
+                currentTime = app.t(end);
+                cutoffTime = app.rollingAverageCutoffTime;
+
+                %% Plot pressure data
                 if app.Pressure1_GraphEnable.Value
-                    plot(app.PressureAxes, app.t, app.pressure_vals1, 'Color', app.PRESSURE_COLOR, 'DisplayName', app.pressure1_label, 'LineWidth', lineWidth);
+                    plot(app.PressureAxes, app.t, app.pressure_vals1, 'Color', app.COLOR_PRESSURE_2, 'DisplayName', app.pressure1_label, 'LineWidth', lineWidth);
                 end
                 if app.Pressure2_GraphEnable.Value
-                    plot(app.PressureAxes, app.t, app.pressure_vals2, 'Color', app.PRESSURE_COLOR*0.5, 'DisplayName', app.pressure2_label, 'LineWidth', lineWidth);
+                    plot(app.PressureAxes, app.t, app.pressure_vals2, 'Color', app.COLOR_PRESSURE*0.5, 'DisplayName', app.pressure2_label, 'LineWidth', lineWidth);
                 end
                 if app.Pressure3_GraphEnable.Value
                     plot(app.PressureAxes, app.t, app.pressure_vals3, 'Color', [0 0 0], 'DisplayName', app.pressure3_label, 'LineWidth', lineWidth);
@@ -873,12 +898,6 @@ classdef CCTA_exported < matlab.apps.AppBase
                 if contains(app.PID_setpoint_id,"Pressure")
                     plot(app.PressureAxes, app.t, ones(1,length(app.t))*app.PID_setpoint, '--r', 'DisplayName', 'Target', 'LineWidth', lineWidth)
                 end
-
-                hold(app.PressureAxes, 'off');
-                xlabel(app.PressureAxes, 'Time (s)');
-                ylabel(app.PressureAxes, 'Pressure (mmHg)');
-                lgdPressure = legend(app.PressureAxes, 'show','Location','northwest');
-                lgdPressure.FontSize = 8;
 
                 % Determine appropriate y-limit
                 if contains(app.PID_setpoint_id,"Pressure")
@@ -892,7 +911,21 @@ classdef CCTA_exported < matlab.apps.AppBase
                 pressureMax = max(pressureDefaultMax, pressureMax * 1.1);  % Add 10% headroom
                 ylim(app.PressureAxes, [pressureMin pressureMax]);
 
-                % Plot flow data
+                % Shade area corresponding to rolling average
+                ylims = ylim(app.PressureAxes);
+                x_fill = [cutoffTime, currentTime, currentTime, cutoffTime];
+                y_fill = [ylims(1), ylims(1), ylims(2), ylims(2)];
+                fill(app.PressureAxes, x_fill, y_fill, app.COLOR_PRESSURE, 'FaceAlpha', 0.2, 'EdgeColor', 'none', 'DisplayName', 'Roll. Avg.');
+                hold(app.PressureAxes, 'off');
+
+                % Axes labels and legend
+                xlabel(app.PressureAxes, 'Time (s)');
+                ylabel(app.PressureAxes, 'Pressure (mmHg)');
+                lgdPressure = legend(app.PressureAxes, 'show','Orientation','horizontal');
+                lgdPressure.Position = [0.1809    0.0426    0.6998    0.0520];
+                lgdPressure.FontSize = 8;
+
+                %% Plot flow data
                 hold(app.FlowAxes, 'on');
                 cla(app.FlowAxes); % Clear previous plots
 
@@ -907,15 +940,7 @@ classdef CCTA_exported < matlab.apps.AppBase
                     plot(app.FlowAxes, app.t, ones(1,length(app.t))*app.PID_setpoint, '--r', 'DisplayName', 'Target', 'LineWidth', lineWidth)
                 end
 
-                hold(app.FlowAxes, 'off');
-                xlabel(app.FlowAxes, 'Time (s)');
-                ylabel(app.FlowAxes, 'Flow (L/min)');
-                ylim(app.FlowAxes, [0 5]);
-                lgdFlow = legend(app.FlowAxes, 'show','Location','northwest');
-                lgdFlow.FontSize = 8;
-
                 % Determine appropriate y-limit
-                
                 if contains(app.PID_setpoint_id, "Flow")
                     flowMax = max([app.flow_vals1, app.flow_vals2, app.PID_setpoint]);  % if setpoint is for flow adjust y-limit appropriately
                 else
@@ -925,15 +950,33 @@ classdef CCTA_exported < matlab.apps.AppBase
                 flowDefaultMax = 5;
                 flowMax = max(flowDefaultMax, flowMax * 1.1);  % Add 10% headroom
                 ylim(app.FlowAxes, [flowMin flowMax]);
+
+                % Shade area corresponding to rolling average
+                ylims = ylim(app.FlowAxes);
+                x_fill = [cutoffTime, currentTime, currentTime, cutoffTime];
+                y_fill = [ylims(1), ylims(1), ylims(2), ylims(2)];
+                fill(app.FlowAxes, x_fill, y_fill, app.FLOW_COLOR, 'FaceAlpha', 0.2, 'EdgeColor', 'none', 'DisplayName', 'Roll. Avg.');
+                hold(app.FlowAxes, 'off');
+
+                % Axes labels and legend
+                hold(app.FlowAxes, 'off');
+                xlabel(app.FlowAxes, 'Time (s)');
+                ylabel(app.FlowAxes, 'Flow (L/min)');
+                ylim(app.FlowAxes, [0 5]);
+                lgdFlow = legend(app.FlowAxes, 'show','Orientation','Horizontal');
+                lgdFlow.Position = [0.2496    0.0424    0.5516    0.0520];
+                lgdFlow.FontSize = 8;
             end
 
             pause(0.1);  % small pause to prevent CPU overuse
         end
         
         function continueSHOCalibration(app)
+            app.setGUIEnabledCalibration(false);  % Disable UI to prevent interference with calibration
 
             % Run main loop for some time to collect values
             app.clearDataArrays();
+            app.setPumpPower(0);  % static head offset is measured when the system is static (i.e. off)
             app.runMainLoop(app.CALIBRATION_DURATION);
 
             % Step 4: Calculate average pressures
@@ -982,6 +1025,98 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.setControlMode("Manual");
             app.setGUIEnabledCalibration(true);
         end
+        
+        function updateSensorAverages(app)
+            % Get the current time and compute the cutoff time
+            currentTime = app.t(end);
+            app.rollingAverageCutoffTime = max([currentTime - app.ROLLING_AVERAGE_DURATION,0]);
+
+            % Find the index of the first value within the last N seconds
+            idx = find(app.t >= app.rollingAverageCutoffTime, 1);
+
+            % If the array is too short or cutoff not found, use entire array
+            if isempty(idx)
+                idx = 1;
+            end
+
+            % Compute averages and standard deviations for the last N seconds
+            p1 = app.pressure_vals1(idx:end);
+            p2 = app.pressure_vals2(idx:end);
+            p3 = app.pressure_vals3(idx:end);
+            f1 = app.flow_vals1(idx:end);
+            f2 = app.flow_vals2(idx:end);
+
+            % Calculate means and standard deviations
+            avgStruct = struct( ...
+                'Pressure1', [mean(p1), std(p1)], ...
+                'Pressure2', [mean(p2), std(p2)], ...
+                'Pressure3', [mean(p3), std(p3)], ...
+                'Flow1',     [mean(f1), std(f1)], ...
+                'Flow2',     [mean(f2), std(f2)] ...
+                );
+
+            % Update UI fields
+            app.Pressure1_EditField_Avg.Value = sprintf("%.2f ± %.1f", avgStruct.Pressure1);
+            app.Pressure2_EditField_Avg.Value = sprintf("%.2f ± %.1f", avgStruct.Pressure2);
+            app.Pressure3_EditField_Avg.Value = sprintf("%.2f ± %.1f", avgStruct.Pressure3);
+            app.Flow1_EditField_Avg.Value     = sprintf("%.2f ± %.1f", avgStruct.Flow1);
+            app.Flow2_EditField_Avg.Value     = sprintf("%.2f ± %.1f", avgStruct.Flow2);
+
+            % Reset all backgrounds to normal
+            app.Pressure1_EditField_Avg.BackgroundColor = app.COLOR_NORMAL;
+            app.Pressure2_EditField_Avg.BackgroundColor = app.COLOR_NORMAL;
+            app.Pressure3_EditField_Avg.BackgroundColor = app.COLOR_NORMAL;
+            app.Flow1_EditField_Avg.BackgroundColor     = app.COLOR_NORMAL;
+            app.Flow2_EditField_Avg.BackgroundColor     = app.COLOR_NORMAL;
+
+            % If no setpoint selected, skip highlight
+            if ~strcmp(app.PID_setpoint_id, "None")
+                if isfield(avgStruct, app.PID_setpoint_id)
+                    % Get setpoint value and mean/std
+                    sp = app.PID_setpoint;
+                    stats = avgStruct.(app.PID_setpoint_id);
+                    mu = stats(1);
+                    sigma = stats(2);
+
+                    % Check if within mean ± std
+                    if sp >= (mu - sigma) && sp <= (mu + sigma)
+                        color = app.COLOR_CONNECTED;
+                    else
+                        color = app.COLOR_WARNING;
+                    end
+
+                    % Set background color for corresponding Avg field
+                    avgField = app.PID_setpoint_id + "_EditField_Avg";
+                    app.(avgField).BackgroundColor = color;
+                end
+            end
+
+        end
+
+        
+        function setPumpPower(app,percentPower)
+            % Calculate flow duty cycle value
+            app.flowDutyCycle = round(percentPower/100*app.ARDUINO_ANALOGWRITE_MAX);
+
+            % Update UI
+            app.PumpPowerSpinner.Value = percentPower;
+            alpha = percentPower/100;
+            app.PumpPowerSpinner.BackgroundColor = (1 - alpha) * app.COLOR_NORMAL + alpha * app.COLOR_WARNING;
+            app.PumpPowerSlider.Value = percentPower;
+            app.CurrentPumpAnalogWriteValueEditField.Value = app.flowDutyCycle;
+
+            % Send pump power command to Arduino
+            if ~isempty(app.arduinoObj)
+                flushoutput(app.arduinoObj);  % in case this was done in the middle of sending another command
+            end
+
+            % Send command to Arduino
+            if app.SimulateDataCheckBox.Value == false
+                command = sprintf("PMP: %d",app.flowDutyCycle);
+                writeline(app.arduinoObj,command);
+                app.WaitForArduinoMessage();
+            end
+        end
     end
 
 
@@ -996,6 +1131,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             addpath(fullfile(app.appDir, 'helpers'));  % add helper functions to path
             app.PID_errors = zeros(1, app.PID_ERRORS_LENGTH);
             app.pulsatileFlowPeriod = app.pulsatileFlowTimes(end);
+            app.UIFigure.Resize = 'off';
 
             % Update UI elements
             app.UIFigure.Name = 'Cardiac Catheterization Testing Apparatus (CCTA)';
@@ -1034,6 +1170,7 @@ classdef CCTA_exported < matlab.apps.AppBase
                 pause(1);  % Pause 1 second if data was cleared quickly, to give user feedback
             end
 
+            tic;  % reset timer so graph data doesn't have a time shift
             close(dlg);
 
             app.runMainLoop();  % Re-run it here from the beginning to reset time array properly
@@ -1252,15 +1389,9 @@ classdef CCTA_exported < matlab.apps.AppBase
 
         % Value changed function: PumpPowerSlider
         function PumpPowerSliderValueChanged(app, event)
-            app.flowDutyCycle = round(app.PumpPowerSlider.Value/app.PumpPowerSlider.Limits(2)*app.ARDUINO_ANALOGWRITE_MAX);
-            app.CurrentPumpAnalogWriteValueEditField.Value = app.flowDutyCycle;
             app.setControlMode("Manual");
-
-            if ~isempty(app.arduinoObj)
-                flushoutput(app.arduinoObj);  % in case this was done in the middle of sending another command
-            end
-
-            app.sendControlValuesToArduino();
+            pumpPowerPercent = app.PumpPowerSlider.Value;
+            app.setPumpPower(pumpPowerPercent);
         end
 
         % Value changed function: ControlModeSwitch
@@ -1311,27 +1442,18 @@ classdef CCTA_exported < matlab.apps.AppBase
 
         % Button pushed function: CalibrateButton
         function CalibrateButtonPushed(app, event)
-            % Optional: make the dialog modal if you want, but it'll still be non-blocking
-            d.WindowStyle = 'normal';
-
-            % Set pump power
-            app.setControlMode("Calibration");
-            calibrationPower = 0.1;
-            app.flowDutyCycle = round(calibrationPower * app.ARDUINO_ANALOGWRITE_MAX);
-            app.CurrentPumpAnalogWriteValueEditField.Value = app.flowDutyCycle;
-            app.PumpPowerSlider.Value = app.flowDutyCycle / app.ARDUINO_ANALOGWRITE_MAX * app.PumpPowerSlider.Limits(2);
-
-            % Disable UI to prevent interference with calibration
-            app.setGUIEnabledCalibration(false);
+            app.setControlMode("Manual");
+            app.setPumpPower(app.PUMP_LOW_POWER);  % to help with debubbling
 
             % Create non-blocking custom dialog
             %
             % Must create after setting other settings above to prevent rest of
             % code from running in the wrong order
             d = uifigure('Name', 'SHO Calibration', 'Position', [500 500 400 200]);
+            d.WindowStyle = 'normal';
 
             uilabel(d, ...
-                'Text', 'Setting pump to 10% power. Please debubble the system. Once the system has been debubbled, press "Continue" to complete calibration.', ...
+                'Text', 'System has been set to low power and manual pump control. Please debubble the system (you may continue changing the pump power as needed), then press "Continue" to complete calibration.', ...
                 'Position', [20 80 360 80], ...
                 'FontSize', 12, ...
                 'FontWeight', 'bold', ...
@@ -1429,10 +1551,47 @@ classdef CCTA_exported < matlab.apps.AppBase
             if value == true
                 app.PauseGraphsButton.BackgroundColor = app.COLOR_DISCONNECTED;
                 app.PauseGraphsButton.Text = "Unpause Graphs";
+                app.PauseGraphsButton.Icon = "assets/play-button-arrowhead.png";
             else
                 app.PauseGraphsButton.BackgroundColor = app.BUTTON_COLOR1;
                 app.PauseGraphsButton.Text = "Pause Graphs";
+                app.PauseGraphsButton.Icon = "assets/pause_icon.png";
             end
+        end
+
+        % Callback function: not associated with a component
+        function STOPPUMPButtonValueChanged(app, event)
+            value = app.STOPPUMPButton.Value;
+            
+            if value
+                app.flowDutyCycle = 0;
+                app.CurrentPumpAnalogWriteValueEditField.Value = app.flowDutyCycle;
+                app.setControlMode("Manual");
+                app.pumpStopped = true;
+            else
+                app.pumpStopped = false;
+            end
+        end
+
+        % Value changed function: RollingaveragedurationEditField
+        function RollingaveragedurationEditFieldValueChanged(app, event)
+            app.ROLLING_AVERAGE_DURATION = app.RollingaveragedurationEditField.Value;
+            app.dimEditFieldTemporarily(app.RollingaveragedurationEditField);
+        end
+
+        % Value changed function: PumpPowerSpinner
+        function PumpPowerSpinnerValueChanged(app, event)
+            pumpPowerPercent = app.PumpPowerSpinner.Value;
+            app.flowDutyCycle = round(pumpPowerPercent/100*app.ARDUINO_ANALOGWRITE_MAX);
+            app.CurrentPumpAnalogWriteValueEditField.Value = app.flowDutyCycle;
+            app.PumpPowerSlider.Value = pumpPowerPercent;
+            app.setControlMode("Manual");
+
+            if ~isempty(app.arduinoObj)
+                flushoutput(app.arduinoObj);  % in case this was done in the middle of sending another command
+            end
+
+            app.sendControlValuesToArduino();
         end
     end
 
@@ -1450,12 +1609,12 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.UIFigure.Position = [100 100 1240 564];
             app.UIFigure.Name = 'MATLAB App';
 
-            % Create TabGroup2
-            app.TabGroup2 = uitabgroup(app.UIFigure);
-            app.TabGroup2.Position = [1 1 1240 564];
+            % Create MainTabGroup
+            app.MainTabGroup = uitabgroup(app.UIFigure);
+            app.MainTabGroup.Position = [1 1 1240 564];
 
             % Create MainTab
-            app.MainTab = uitab(app.TabGroup2);
+            app.MainTab = uitab(app.MainTabGroup);
             app.MainTab.Title = 'Main';
 
             % Create PressureDetailsPanel
@@ -1634,11 +1793,11 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.Pressure3_EditField_SHO.Tooltip = {'SHO - Static Head Offset. Adjusts for pressure changes caused by fluid height differences in the system.'};
             app.Pressure3_EditField_SHO.Position = [340 30 43 22];
 
-            % Create AvgSDLabel
-            app.AvgSDLabel = uilabel(app.PressureDetailsPanel);
-            app.AvgSDLabel.HorizontalAlignment = 'center';
-            app.AvgSDLabel.Position = [174 117 85 22];
-            app.AvgSDLabel.Text = 'Avg ± SD';
+            % Create RollAvgSDLabel
+            app.RollAvgSDLabel = uilabel(app.PressureDetailsPanel);
+            app.RollAvgSDLabel.HorizontalAlignment = 'center';
+            app.RollAvgSDLabel.Position = [174 117 85 22];
+            app.RollAvgSDLabel.Text = 'Roll. Avg ± SD';
 
             % Create Pressure1_EditField_Avg
             app.Pressure1_EditField_Avg = uieditfield(app.PressureDetailsPanel, 'text');
@@ -1760,20 +1919,20 @@ classdef CCTA_exported < matlab.apps.AppBase
             % Create Flow2_GraphEnable
             app.Flow2_GraphEnable = uicheckbox(app.FlowDetailsPanel);
             app.Flow2_GraphEnable.Text = '';
-            app.Flow2_GraphEnable.Position = [378 28 15 22];
+            app.Flow2_GraphEnable.Position = [393 30 15 22];
             app.Flow2_GraphEnable.Value = true;
 
             % Create Flow1_GraphEnable
             app.Flow1_GraphEnable = uicheckbox(app.FlowDetailsPanel);
             app.Flow1_GraphEnable.Text = '';
-            app.Flow1_GraphEnable.Position = [378 57 14 22];
+            app.Flow1_GraphEnable.Position = [393 59 14 22];
             app.Flow1_GraphEnable.Value = true;
 
             % Create Label_10
             app.Label_10 = uilabel(app.FlowDetailsPanel);
             app.Label_10.HorizontalAlignment = 'center';
             app.Label_10.FontSize = 18;
-            app.Label_10.Position = [370 81 30 23];
+            app.Label_10.Position = [385 83 30 23];
             app.Label_10.Text = '👁️';
 
             % Create SensorLabel_2
@@ -1789,13 +1948,13 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.Flow2_LabelField.HorizontalAlignment = 'center';
             app.Flow2_LabelField.FontAngle = 'italic';
             app.Flow2_LabelField.Tooltip = {'Graph label for this sensor (changes legend entry).'};
-            app.Flow2_LabelField.Position = [297 28 63 22];
+            app.Flow2_LabelField.Position = [312 30 63 22];
             app.Flow2_LabelField.Value = '2';
 
             % Create Label_9
             app.Label_9 = uilabel(app.FlowDetailsPanel);
             app.Label_9.HorizontalAlignment = 'center';
-            app.Label_9.Position = [297 81 63 22];
+            app.Label_9.Position = [312 83 63 22];
 
             % Create Flow1_LabelField
             app.Flow1_LabelField = uieditfield(app.FlowDetailsPanel, 'text');
@@ -1803,29 +1962,21 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.Flow1_LabelField.HorizontalAlignment = 'center';
             app.Flow1_LabelField.FontAngle = 'italic';
             app.Flow1_LabelField.Tooltip = {'Graph label for this sensor (changes legend entry).'};
-            app.Flow1_LabelField.Position = [297 58 63 22];
+            app.Flow1_LabelField.Position = [312 60 63 22];
             app.Flow1_LabelField.Value = '1';
 
-            % Create AvgSDLabel_2
-            app.AvgSDLabel_2 = uilabel(app.FlowDetailsPanel);
-            app.AvgSDLabel_2.HorizontalAlignment = 'center';
-            app.AvgSDLabel_2.Position = [215 80 72 22];
-            app.AvgSDLabel_2.Text = 'Avg ± SD';
-
-            % Create Flow1_EditField_Avg
-            app.Flow1_EditField_Avg = uieditfield(app.FlowDetailsPanel, 'text');
-            app.Flow1_EditField_Avg.Editable = 'off';
-            app.Flow1_EditField_Avg.HorizontalAlignment = 'center';
-            app.Flow1_EditField_Avg.Tooltip = {'Graph label for this sensor (changes legend entry).'};
-            app.Flow1_EditField_Avg.Position = [217 58 72 22];
-            app.Flow1_EditField_Avg.Value = '0';
+            % Create RollAvgSDLabel_2
+            app.RollAvgSDLabel_2 = uilabel(app.FlowDetailsPanel);
+            app.RollAvgSDLabel_2.HorizontalAlignment = 'center';
+            app.RollAvgSDLabel_2.Position = [219 81 82 22];
+            app.RollAvgSDLabel_2.Text = 'Roll. Avg ± SD';
 
             % Create Flow2_EditField_Avg
             app.Flow2_EditField_Avg = uieditfield(app.FlowDetailsPanel, 'text');
             app.Flow2_EditField_Avg.Editable = 'off';
             app.Flow2_EditField_Avg.HorizontalAlignment = 'center';
             app.Flow2_EditField_Avg.Tooltip = {'Graph label for this sensor (changes legend entry).'};
-            app.Flow2_EditField_Avg.Position = [217 28 72 22];
+            app.Flow2_EditField_Avg.Position = [217 28 85 22];
             app.Flow2_EditField_Avg.Value = '0';
 
             % Create Flow_ResetAllTargetButton
@@ -1841,8 +1992,16 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.Flow_ResetAllLabelButton.ButtonPushedFcn = createCallbackFcn(app, @Flow_ResetAllLabelButtonPushed, true);
             app.Flow_ResetAllLabelButton.BackgroundColor = [0.902 0.902 0.902];
             app.Flow_ResetAllLabelButton.FontSize = 8;
-            app.Flow_ResetAllLabelButton.Position = [298 7 62 15];
+            app.Flow_ResetAllLabelButton.Position = [313 9 62 15];
             app.Flow_ResetAllLabelButton.Text = 'Reset All';
+
+            % Create Flow1_EditField_Avg
+            app.Flow1_EditField_Avg = uieditfield(app.FlowDetailsPanel, 'text');
+            app.Flow1_EditField_Avg.Editable = 'off';
+            app.Flow1_EditField_Avg.HorizontalAlignment = 'center';
+            app.Flow1_EditField_Avg.Tooltip = {'Graph label for this sensor (changes legend entry).'};
+            app.Flow1_EditField_Avg.Position = [217 60 85 22];
+            app.Flow1_EditField_Avg.Value = '0';
 
             % Create PressureGraphPanel
             app.PressureGraphPanel = uipanel(app.MainTab);
@@ -1864,7 +2023,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.PressureAxes.Color = [0.902 0.902 0.902];
             app.PressureAxes.FontSize = 14;
             app.PressureAxes.Visible = 'off';
-            app.PressureAxes.Position = [13 5 409 312];
+            app.PressureAxes.Position = [13 44 409 273];
 
             % Create PressureAxesWaitingForConnectionLabel
             app.PressureAxesWaitingForConnectionLabel = uilabel(app.PressureGraphPanel);
@@ -1873,7 +2032,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.PressureAxesWaitingForConnectionLabel.FontWeight = 'bold';
             app.PressureAxesWaitingForConnectionLabel.FontColor = [0.149 0.149 0.149];
             app.PressureAxesWaitingForConnectionLabel.Enable = 'off';
-            app.PressureAxesWaitingForConnectionLabel.Position = [99 141 258 47];
+            app.PressureAxesWaitingForConnectionLabel.Position = [99 163 258 47];
             app.PressureAxesWaitingForConnectionLabel.Text = 'No connection';
 
             % Create PumpControlPanel
@@ -1882,27 +2041,26 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.PumpControlPanel.Title = 'Pump Control';
             app.PumpControlPanel.BackgroundColor = [0.902 0.902 0.902];
             app.PumpControlPanel.FontWeight = 'bold';
-            app.PumpControlPanel.Position = [17 189 302 150];
+            app.PumpControlPanel.Position = [17 153 302 186];
 
             % Create PumpPowerSliderLabel
             app.PumpPowerSliderLabel = uilabel(app.PumpControlPanel);
             app.PumpPowerSliderLabel.HorizontalAlignment = 'right';
             app.PumpPowerSliderLabel.FontWeight = 'bold';
-            app.PumpPowerSliderLabel.Position = [10 57 95 22];
+            app.PumpPowerSliderLabel.Position = [10 93 95 22];
             app.PumpPowerSliderLabel.Text = 'Pump Power  %';
 
             % Create PumpPowerSlider
             app.PumpPowerSlider = uislider(app.PumpControlPanel);
             app.PumpPowerSlider.ValueChangedFcn = createCallbackFcn(app, @PumpPowerSliderValueChanged, true);
             app.PumpPowerSlider.Tooltip = {'Sends a PWM signal to the pump from 0 to 100% power. 100% power represents the full voltage of your power supply.'};
-            app.PumpPowerSlider.Position = [126 66 150 3];
-            app.PumpPowerSlider.Value = 50;
+            app.PumpPowerSlider.Position = [126 102 150 3];
 
             % Create ControlModeSwitchLabel
             app.ControlModeSwitchLabel = uilabel(app.PumpControlPanel);
             app.ControlModeSwitchLabel.HorizontalAlignment = 'center';
             app.ControlModeSwitchLabel.FontWeight = 'bold';
-            app.ControlModeSwitchLabel.Position = [15 91 82 22];
+            app.ControlModeSwitchLabel.Position = [15 127 82 22];
             app.ControlModeSwitchLabel.Text = 'Control Mode';
 
             % Create ControlModeSwitch
@@ -1910,7 +2068,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.ControlModeSwitch.Items = {'Manual', 'Auto'};
             app.ControlModeSwitch.ValueChangedFcn = createCallbackFcn(app, @ControlModeSwitchValueChanged, true);
             app.ControlModeSwitch.Tooltip = {'Manual - control pump power using the slider below'; ''; 'Auto - Input a flow or pressure target value in the appropriate box underneath the graphs, and the system will automatically adjust'};
-            app.ControlModeSwitch.Position = [192 92 45 20];
+            app.ControlModeSwitch.Position = [192 128 45 20];
             app.ControlModeSwitch.Value = 'Manual';
 
             % Create StartPulsatileFlowButton
@@ -1918,7 +2076,13 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.StartPulsatileFlowButton.ValueChangedFcn = createCallbackFcn(app, @StartPulsatileFlowButtonValueChanged, true);
             app.StartPulsatileFlowButton.Enable = 'off';
             app.StartPulsatileFlowButton.Text = 'Start Pulsatile Flow';
-            app.StartPulsatileFlowButton.Position = [89 4 118 23];
+            app.StartPulsatileFlowButton.Position = [170 8 118 23];
+
+            % Create PumpPowerSpinner
+            app.PumpPowerSpinner = uispinner(app.PumpControlPanel);
+            app.PumpPowerSpinner.RoundFractionalValues = 'on';
+            app.PumpPowerSpinner.ValueChangedFcn = createCallbackFcn(app, @PumpPowerSpinnerValueChanged, true);
+            app.PumpPowerSpinner.Position = [15 76 92 17];
 
             % Create FlowGraphPanel
             app.FlowGraphPanel = uipanel(app.MainTab);
@@ -1938,7 +2102,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.FlowAxes.Color = [0.902 0.902 0.902];
             app.FlowAxes.GridColor = [0.149 0.149 0.149];
             app.FlowAxes.FontSize = 14;
-            app.FlowAxes.Position = [15 9 419 310];
+            app.FlowAxes.Position = [15 44 419 275];
 
             % Create FlowAxesWaitingForConnectionLabel
             app.FlowAxesWaitingForConnectionLabel = uilabel(app.FlowGraphPanel);
@@ -1947,7 +2111,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.FlowAxesWaitingForConnectionLabel.FontWeight = 'bold';
             app.FlowAxesWaitingForConnectionLabel.FontColor = [0.149 0.149 0.149];
             app.FlowAxesWaitingForConnectionLabel.Enable = 'off';
-            app.FlowAxesWaitingForConnectionLabel.Position = [114 141 258 47];
+            app.FlowAxesWaitingForConnectionLabel.Position = [117 163 258 47];
             app.FlowAxesWaitingForConnectionLabel.Text = 'No connection';
 
             % Create OptionsPanel
@@ -1959,6 +2123,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.PauseGraphsButton = uibutton(app.OptionsPanel, 'state');
             app.PauseGraphsButton.ValueChangedFcn = createCallbackFcn(app, @PauseGraphsButtonValueChanged, true);
             app.PauseGraphsButton.Enable = 'off';
+            app.PauseGraphsButton.Tooltip = {'Pause graphs (useful if you want to zoom into graphs and interact with them, since that does not work well while the graphs are live).'};
             app.PauseGraphsButton.Icon = fullfile(pathToMLAPP, 'assets', 'pause_icon.png');
             app.PauseGraphsButton.Text = 'Pause Graphs';
             app.PauseGraphsButton.BackgroundColor = [0.1569 0.5725 0.8431];
@@ -2086,7 +2251,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.FlowDataTitleLabel.Text = 'Flow Data (L/min)';
 
             % Create SettingsTab
-            app.SettingsTab = uitab(app.TabGroup2);
+            app.SettingsTab = uitab(app.MainTabGroup);
             app.SettingsTab.Title = 'Settings';
 
             % Create PIDCoefficientsPanel
@@ -2198,25 +2363,25 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.KdEditFieldLabel.Position = [346 10 25 22];
             app.KdEditFieldLabel.Text = 'Kd';
 
-            % Create DeveloperOptionsPanel
-            app.DeveloperOptionsPanel = uipanel(app.SettingsTab);
-            app.DeveloperOptionsPanel.Title = 'Developer Options';
-            app.DeveloperOptionsPanel.FontWeight = 'bold';
-            app.DeveloperOptionsPanel.Position = [499 383 260 140];
+            % Create DeveloperToolsPanel
+            app.DeveloperToolsPanel = uipanel(app.SettingsTab);
+            app.DeveloperToolsPanel.Title = 'Developer Tools';
+            app.DeveloperToolsPanel.FontWeight = 'bold';
+            app.DeveloperToolsPanel.Position = [499 383 260 140];
 
             % Create SimulateDataCheckBox
-            app.SimulateDataCheckBox = uicheckbox(app.DeveloperOptionsPanel);
+            app.SimulateDataCheckBox = uicheckbox(app.DeveloperToolsPanel);
             app.SimulateDataCheckBox.ValueChangedFcn = createCallbackFcn(app, @SimulateDataCheckBoxValueChanged, true);
-            app.SimulateDataCheckBox.Tooltip = {'Simulates data without requiring a connection to a microcontroller. Mostly useful for testing that the GUI works.'};
+            app.SimulateDataCheckBox.Tooltip = {'Simulates data without requiring a connection to a microcontroller. Mostly useful for testing that the GUI works. '; ''; 'To simulate, check the checkbox then go to the ''Main'' tab and click ''Connect''. Don''t worry about what device is listed on the dropdown there.'};
             app.SimulateDataCheckBox.Text = 'Simulate Data?';
             app.SimulateDataCheckBox.Position = [14 88 160 22];
 
-            % Create CurrentPumpAnalogWriteValue0255EditFieldLabel
-            app.CurrentPumpAnalogWriteValue0255EditFieldLabel = uilabel(app.SettingsTab);
-            app.CurrentPumpAnalogWriteValue0255EditFieldLabel.HorizontalAlignment = 'right';
-            app.CurrentPumpAnalogWriteValue0255EditFieldLabel.FontWeight = 'bold';
-            app.CurrentPumpAnalogWriteValue0255EditFieldLabel.Position = [773 490 201 30];
-            app.CurrentPumpAnalogWriteValue0255EditFieldLabel.Text = {'Current Pump Analog Write Value '; '(0-255)'};
+            % Create CurrentPumpAnalogWriteValue0255Label
+            app.CurrentPumpAnalogWriteValue0255Label = uilabel(app.SettingsTab);
+            app.CurrentPumpAnalogWriteValue0255Label.HorizontalAlignment = 'right';
+            app.CurrentPumpAnalogWriteValue0255Label.FontWeight = 'bold';
+            app.CurrentPumpAnalogWriteValue0255Label.Position = [513 421 117 30];
+            app.CurrentPumpAnalogWriteValue0255Label.Text = {'Current Pump '; 'Analog Write Value '};
 
             % Create CurrentPumpAnalogWriteValueEditField
             app.CurrentPumpAnalogWriteValueEditField = uieditfield(app.SettingsTab, 'numeric');
@@ -2224,28 +2389,42 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.CurrentPumpAnalogWriteValueEditField.RoundFractionalValues = 'on';
             app.CurrentPumpAnalogWriteValueEditField.ValueChangedFcn = createCallbackFcn(app, @CurrentPumpAnalogWriteValueEditFieldValueChanged, true);
             app.CurrentPumpAnalogWriteValueEditField.Editable = 'off';
-            app.CurrentPumpAnalogWriteValueEditField.Position = [989 498 66 22];
+            app.CurrentPumpAnalogWriteValueEditField.Position = [645 425 96 22];
 
             % Create OtherSettingsPanel
             app.OtherSettingsPanel = uipanel(app.SettingsTab);
             app.OtherSettingsPanel.Title = 'Other Settings';
-            app.OtherSettingsPanel.Position = [17 297 469 73];
+            app.OtherSettingsPanel.FontWeight = 'bold';
+            app.OtherSettingsPanel.Position = [17 246 469 124];
 
             % Create CalibrationdurationsEditFieldLabel
             app.CalibrationdurationsEditFieldLabel = uilabel(app.OtherSettingsPanel);
             app.CalibrationdurationsEditFieldLabel.HorizontalAlignment = 'right';
-            app.CalibrationdurationsEditFieldLabel.Position = [116 13 126 22];
+            app.CalibrationdurationsEditFieldLabel.Position = [116 64 126 22];
             app.CalibrationdurationsEditFieldLabel.Text = 'Calibration duration (s)';
 
             % Create CalibrationdurationsEditField
             app.CalibrationdurationsEditField = uieditfield(app.OtherSettingsPanel, 'numeric');
             app.CalibrationdurationsEditField.Limits = [0 Inf];
             app.CalibrationdurationsEditField.ValueChangedFcn = createCallbackFcn(app, @CalibrationdurationsEditFieldValueChanged, true);
-            app.CalibrationdurationsEditField.Position = [257 13 100 22];
+            app.CalibrationdurationsEditField.Position = [257 64 100 22];
             app.CalibrationdurationsEditField.Value = 30;
 
+            % Create RollingaveragedurationEditFieldLabel
+            app.RollingaveragedurationEditFieldLabel = uilabel(app.OtherSettingsPanel);
+            app.RollingaveragedurationEditFieldLabel.HorizontalAlignment = 'right';
+            app.RollingaveragedurationEditFieldLabel.Position = [107 33 135 22];
+            app.RollingaveragedurationEditFieldLabel.Text = 'Rolling average duration';
+
+            % Create RollingaveragedurationEditField
+            app.RollingaveragedurationEditField = uieditfield(app.OtherSettingsPanel, 'numeric');
+            app.RollingaveragedurationEditField.Limits = [0 Inf];
+            app.RollingaveragedurationEditField.ValueChangedFcn = createCallbackFcn(app, @RollingaveragedurationEditFieldValueChanged, true);
+            app.RollingaveragedurationEditField.Position = [257 33 100 22];
+            app.RollingaveragedurationEditField.Value = 10;
+
             % Create HelpTab
-            app.HelpTab = uitab(app.TabGroup2);
+            app.HelpTab = uitab(app.MainTabGroup);
             app.HelpTab.Title = 'Help';
 
             % Create HTML
