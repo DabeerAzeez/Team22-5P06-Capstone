@@ -1296,7 +1296,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             %   recent pressure and flow values within a defined time window. It updates
             %   the text in the UI average value fields as well as the
             %   background color if it is that sensor being targetted by PID control
-            %   and the mean value is within uncertainty to the current setpoint. 
+            %   and the mean value is within uncertainty to the current setpoint.
             %
             %   Inputs:
             %       None
@@ -1330,36 +1330,29 @@ classdef CCTA_exported < matlab.apps.AppBase
             [mu4, s4] = mu_sigma(f1);
             [mu5, s5] = mu_sigma(f2);
 
-            % Create formatted strings
-            sP1 = sprintf("%.2f ± %.1f", mu1, s1);
-            sP2 = sprintf("%.2f ± %.1f", mu2, s2);
-            sP3 = sprintf("%.2f ± %.1f", mu3, s3);
-            sF1 = sprintf("%.2f ± %.1f", mu4, s4);
-            sF2 = sprintf("%.2f ± %.1f", mu5, s5);
-
             % Store in struct
             avgStruct = struct( ...
-                'Pressure1', sP1, ...
-                'Pressure2', sP2, ...
-                'Pressure3', sP3, ...
-                'Flow1',     sF1, ...
-                'Flow2',     sF2 ...
+                'Pressure1', struct('mu', mu1, 'sigma', s1, 'str', sprintf("%.2f ± %.1f", mu1, s1)), ...
+                'Pressure2', struct('mu', mu2, 'sigma', s2, 'str', sprintf("%.2f ± %.1f", mu2, s2)), ...
+                'Pressure3', struct('mu', mu3, 'sigma', s3, 'str', sprintf("%.2f ± %.1f", mu3, s3)), ...
+                'Flow1',     struct('mu', mu4, 'sigma', s4, 'str', sprintf("%.2f ± %.1f", mu4, s4)), ...
+                'Flow2',     struct('mu', mu5, 'sigma', s5, 'str', sprintf("%.2f ± %.1f", mu5, s5)) ...
                 );
 
             % Append to log arrays
-            app.pressure_vals1_avgs(end+1) = sP1;
-            app.pressure_vals2_avgs(end+1) = sP2;
-            app.pressure_vals3_avgs(end+1) = sP3;
-            app.flow_vals1_avgs(end+1)     = sF1;
-            app.flow_vals2_avgs(end+1)     = sF2;
+            app.pressure_vals1_avgs(end+1) = avgStruct.Pressure1.str;
+            app.pressure_vals2_avgs(end+1) = avgStruct.Pressure2.str;
+            app.pressure_vals3_avgs(end+1) = avgStruct.Pressure3.str;
+            app.flow_vals1_avgs(end+1)     = avgStruct.Flow1.str;
+            app.flow_vals2_avgs(end+1)     = avgStruct.Flow2.str;
 
             % Update UI fields
-            app.Pressure1_EditField_Avg.Value = sP1;
-            app.Pressure2_EditField_Avg.Value = sP2;
-            app.Pressure3_EditField_Avg.Value = sP3;
-            app.Flow1_EditField_Avg.Value     = sF1;
-            app.Flow2_EditField_Avg.Value     = sF2;
-            
+            app.Pressure1_EditField_Avg.Value = avgStruct.Pressure1.str;
+            app.Pressure2_EditField_Avg.Value = avgStruct.Pressure2.str;
+            app.Pressure3_EditField_Avg.Value = avgStruct.Pressure3.str;
+            app.Flow1_EditField_Avg.Value     = avgStruct.Flow1.str;
+            app.Flow2_EditField_Avg.Value     = avgStruct.Flow2.str;
+
             % Highlight appropriate average edit field depending on whether
             % PID control is enabled and has reached target within uncertainty
             % or not
@@ -1375,8 +1368,8 @@ classdef CCTA_exported < matlab.apps.AppBase
                     % Get setpoint value and mean/std
                     sp = app.PID_setpoint;
                     stats = avgStruct.(app.PID_setpoint_id);
-                    mu = stats(1);
-                    sigma = stats(2);
+                    mu = stats.mu;
+                    sigma = stats.sigma;
 
                     % Check if within mean ± std
                     if sp >= (mu - sigma) && sp <= (mu + sigma)
@@ -1395,7 +1388,6 @@ classdef CCTA_exported < matlab.apps.AppBase
                 mu = mean(v);
                 sigma = std(v);
             end
-
         end
 
         
