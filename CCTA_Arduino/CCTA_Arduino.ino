@@ -29,7 +29,6 @@ const unsigned long EXPECTED_MATLAB_MESSAGE_LENGTH = 50;  // Length of message (
 
 const bool SIMULATE_VALUES = false;       // whether simulated values should be sent over serial (for testing GUI without physical setup)
 const bool SIMULATE_OSCILLATIONS = true;  // whether simulated values (if enabled) should oscillate sinusoidally over time
-const float PI 3.14159265                 // for simulating sinusoidal values
 
 // Variables
 volatile int flow1_pulses = 0;      // Flow sensor 1 pulse count
@@ -65,8 +64,6 @@ void setup() {
   // === PIN AND INTERRUPT SETUP ===
   pinMode(FLOW_SENSOR_PIN1, INPUT);
   pinMode(FLOW_SENSOR_PIN2, INPUT);
-  pinMode(PRESSURE_MOTOR_DIR_PIN, OUTPUT);
-  pinMode(PRESSURE_MOTOR_STEP_PIN, OUTPUT);
   digitalWrite(FLOW_SENSOR_PIN1, HIGH);
   digitalWrite(FLOW_SENSOR_PIN2, HIGH);
   attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN1), flow1, RISING);
@@ -168,10 +165,10 @@ void serialEvent() {
     char inChar = (char)Serial.read();
     // add it to the inputString:
     inputString += inChar;
-    // if the incoming character is a newline, set a flag so the main loop can
-    // do something about it:
+    // if the incoming character is a newline, process the full line then reset the string
     if (inChar == '\n') {
       processSerial(inputString);
+      inputString = "";  
     }
   }
 }
@@ -203,15 +200,15 @@ float readFlowSensor(volatile int &flow_pulses, int sensorNum) {
   // Adjust flow rate using calibrated piecewise linear functions
   if (sensorNum == 1) {
     if (flowRate < 1) {
-      flowRate = flowRate * 1.4214;  // Adjusted slope for continuity close to flowRate = 0
-    } else {
-      flowRate = flowRate * 0.8133 + 0.6081;
-    }
-  } else if (sensorNum == 2) {
-    if (flowRate < 1) {
       flowRate = flowRate * 1.5773;  // Adjusted slope for continuity close to flowRate = 0
     } else {
       flowRate = flowRate * 0.7923 + 0.785;
+    }
+  } else if (sensorNum == 2) {
+    if (flowRate < 1) {
+      flowRate = flowRate * 1.4214;  // Adjusted slope for continuity close to flowRate = 0
+    } else {
+      flowRate = flowRate * 0.8133 + 0.6081;
     }
   }
   return flowRate;
@@ -235,6 +232,7 @@ int readPressureSensor(unsigned char pin) {
 float interpolatePressure(float adc_value, int sensorNum) {
   const float *adc_values;
   const float *pressure_mmHg;
+  int size;
 
   // Pressure calibration curves (adc value vs. pressure in mmHg)
   static const float adc_values1[17] = { 62, 155, 232, 340, 433, 530, 640, 719, 810, 887, 945, 965, 970, 974, 979, 985, 990 };
@@ -250,19 +248,23 @@ float interpolatePressure(float adc_value, int sensorNum) {
   if (sensorNum == 1) {
     adc_values = adc_values1;
     pressure_mmHg = pressure_mmHg1;
+    size = 17;
   } else if (sensorNum == 2) {
     adc_values = adc_values2;
     pressure_mmHg = pressure_mmHg2;
+    size = 19;
   } else if (sensorNum == 3) {
     adc_values = adc_values3;
     pressure_mmHg = pressure_mmHg3;
+    size = 18;
   } else { 
     // use sensor 1 values
     adc_values = adc_values1;
     pressure_mmHg = pressure_mmHg1;
+    size = 17;
   }
 
-  int size = sizeof(adc_values) / sizeof(adc_values[0]);
+  // int size = sizeof(adc_values) / sizeof(adc_values[0]);
 
   // Extrapolate below curve (using first two data points)
   if (adc_value <= adc_values[0]) {
@@ -294,10 +296,10 @@ void sendSystemData() {
   Serial.print("NF: ");
   Serial.print(newFlowIndicator);
   Serial.print(", F1: ");
-  Serial.print(flowValue1);
+  Serial.print(flowRate1);
   Serial.print(" L/min");
   Serial.print(", F2: ");
-  Serial.print(flowValue2);
+  Serial.print(flowRate2);
   Serial.print(" L/min");
 
   // Pressure sensor 1
