@@ -25,13 +25,13 @@ classdef CCTA_exported < matlab.apps.AppBase
         FlowAxesWaitingForConnectionLabel  matlab.ui.control.Label
         FlowAxes                       matlab.ui.control.UIAxes
         PumpControlPanel               matlab.ui.container.Panel
+        PumpControlModeDropDown        matlab.ui.control.DropDown
         PumpPowerLamp                  matlab.ui.control.Lamp
-        PumpControlModeSwitchLabel     matlab.ui.control.Label
+        PumpControlModeDropdownLabel   matlab.ui.control.Label
         PumpPowerPercentLabel          matlab.ui.control.Label
         PumpPowerSwitch                matlab.ui.control.Switch
         PumpPowerSwitchLabel           matlab.ui.control.Label
         PumpPowerSpinner               matlab.ui.control.Spinner
-        PumpControlModeSwitch          matlab.ui.control.Switch
         PumpPowerSlider                matlab.ui.control.Slider
         PressureGraphPanel             matlab.ui.container.Panel
         PressureAxesWaitingForConnectionLabel  matlab.ui.control.Label
@@ -136,6 +136,8 @@ classdef CCTA_exported < matlab.apps.AppBase
         CALIBRATION_REST_PERIOD = 5;    % # of seconds to rest before collecting static heads for calibration
         DT_PID = 0.1;                   % Time step for integral/derivative PID calculations (adjust based on system response)
 
+        PAUSE_LENGTH = 0.01;  % For small pauses to prevent CPU overuse, duration of pause (s)
+
         % Colors
         COLOR_PRESSURE = [0.84 0.83 0.86];
         COLOR_PRESSURE_2 = [161, 138, 219]./255;
@@ -194,8 +196,9 @@ classdef CCTA_exported < matlab.apps.AppBase
         % Other variables
         rollingAverageCutoffTime;
 
+        PUMP_MAX_FLOW = 5;  % L/min
         pulsatileFlowEnabled = false;
-        pulsatileFlowValues = [0, 6.8, 4.7, 3.5, 4.7, 5.8, 2.5, 0].*0.7647;  % from Johnson et. al (https://pmc.ncbi.nlm.nih.gov/articles/PMC8757711/#s9), scaled to max ~5 L/min for current pump
+        pulsatileFlowValues = [0, 6.8, 4.7, 3.5, 4.7, 5.8, 2.5, 0];  % from Johnson et. al (https://pmc.ncbi.nlm.nih.gov/articles/PMC8757711/#s9), scaled to max ~5 L/min for current pump
         pulsatileFlowTimes = [0, 0.15, 0.25, 0.4, 0.42, 0.55, 0.7, 1];
         pulsatileFlowPeriod;
 
@@ -465,12 +468,6 @@ classdef CCTA_exported < matlab.apps.AppBase
                     ~, pressure_value1, ~, pressure_value2, ...
                     ~, pressure_value3] = app.parseArduinoData(line);
 
-                % Send pulsatile flow signal to Arduino if enabled
-                if app.pulsatileFlowEnabled
-                    % flow = interp1(app.pulsatileFlowTimes, app.pulsatileFlowValues, ...
-                    %     mod(tNew, app.pulsatileFlowPeriod), 'previous');
-                end
-
                 % Append new sensor data
                 app.t = [app.t tNew];
                 app.setpoint_vals = [app.setpoint_vals app.PID_setpoint];
@@ -519,8 +516,12 @@ classdef CCTA_exported < matlab.apps.AppBase
                 app.updateDataPlots();
 
                 % Update PID if in Auto mode
-                if app.PumpControlMode == "PID"
+                if app.PumpControlMode == "Auto"
                     app.updatePIDOutputs();
+                elseif app.PumpControlMode == "Pulsatile"
+                    flow = interp1(app.pulsatileFlowTimes, app.pulsatileFlowValues, ...
+                        mod(tNew, app.pulsatileFlowPeriod), 'previous');  % interpolate next flow value to use, according to current time
+                    app.setPumpPower(flow/app.PUMP_MAX_FLOW*100);
                 end
 
                 % If duration mode, break when time is up, otherwise update
@@ -553,32 +554,30 @@ classdef CCTA_exported < matlab.apps.AppBase
             %   Outputs:
             %       None
 
-            if lower(mode) == "manual"
-                highlightSetPointUI(app, "None");  % clear any setpoint UI from any prior PID control
+            if mode == "Manual"
+                app.PID_setpoint_id = "None";
+                app.highlightSetPointUI("None");  % clear any setpoint UI from any prior PID control
                 app.PumpControlMode = "Manual";
-                app.PumpControlModeSwitch.Value = "Manual";
-                app.PumpControlModeSwitch.Enable = "off";  % to prevent user from switching toggle when they should just input a setpoint
+                app.PumpControlModeDropDown.Value = "Manual";
                 app.PumpPowerSlider.Enable = "on";
                 app.PumpPowerSpinner.Enable = "on";
+            elseif mode == "Auto"  % PID Control
+                app.PumpControlMode = "Auto";
+                app.PumpControlModeDropDown.Value = "Auto";
+                app.PumpPowerSlider.Enable = "off";
+                app.PumpPowerSpinner.Enable = "off";
+            elseif mode == "Pulsatile"  % Mode not fully implemented yet
                 app.PID_setpoint_id = "None";
-            elseif lower(mode) == "pid"
-                app.PumpControlMode = "PID";
-                app.PumpControlModeSwitch.Value = "Auto";
-                app.PumpControlModeSwitch.Enable = "on";
-                app.PumpPowerSlider.Enable = "off";
-                app.PumpPowerSpinner.Enable = "off";
-            elseif lower(mode) == "pulsatile"  % Mode not fully implemented yet
-                highlightSetPointUI(app, "None");  % clear any setpoint UI from any prior PID control
+                app.highlightSetPointUI("None");  % clear any setpoint UI from any prior PID control
                 app.PumpControlMode = "Pulsatile";
-                app.PumpControlModeSwitch.Value = "Auto";
-                app.PumpControlModeSwitch.Enable = "on";
+                app.PumpControlModeDropDown.Enable = "on";
                 app.PumpPowerSlider.Enable = "off";
                 app.PumpPowerSpinner.Enable = "off";
-            elseif lower(mode) == "calibration"
-                highlightSetPointUI(app, "None");  % clear any setpoint UI from any prior PID control
+            elseif mode == "Calibration"
+                app.PID_setpoint_id = "None";
+                app.highlightSetPointUI("None");  % clear any setpoint UI from any prior PID control
                 app.PumpControlMode = "Calibration";
-                app.PumpControlModeSwitch.Value = "Auto";
-                app.PumpControlModeSwitch.Enable = "off";
+                app.PumpControlModeDropDown.Enable = "off";
                 app.PumpPowerSlider.Enable = "off";
                 app.PumpPowerSpinner.Enable = "off";
             else
@@ -600,6 +599,10 @@ classdef CCTA_exported < matlab.apps.AppBase
             %   Outputs:
             %       None
 
+            if app.PID_setpoint_id == "None"
+                return;  % In case this function gets accidentally called when no PID setpoint is set
+            end
+
             % Choose appropriate PID value based on setpoint ID
             newValues = struct(...
             'Pressure1', app.pressure_vals1(end), ...
@@ -613,7 +616,9 @@ classdef CCTA_exported < matlab.apps.AppBase
             if isfield(newValues, app.PID_setpoint_id)
                 newValue = newValues.(app.PID_setpoint_id); % Use dynamic field referencing
             else
-                uialert('Invalid PID setpoint ID selected: %s', app.PID_setpoint_id);
+                uialert(app.UIFigure, ...
+                    sprintf("Invalid PID setpoint ID selected: %s", app.PID_setpoint_id), ...
+                    "Invalid PID Setpoint");
             end
 
             % Use the correct PID coefficients based on setpoint ID
@@ -625,8 +630,6 @@ classdef CCTA_exported < matlab.apps.AppBase
                 Kp = app.Kp_flow;
                 Ki = app.Ki_flow;
                 Kd = app.Kd_flow;
-            else
-                uialert('Unknown PID setpoint ID: %s', app.PID_setpoint_id);
             end
 
             % Calculate PID output
@@ -790,16 +793,22 @@ classdef CCTA_exported < matlab.apps.AppBase
                 % Simulate data in GUI (for testing)
                 line = "NF: N, F1: 1.50 L/min, F2: 2.50 L/min, P1R: 1023, P1: 20 mmHg, P2R: 1023, P2: 50 mmHg, P3R: 1023, P3: 80 mmHg, Pump: 128/255\n";
             else
-                if app.arduinoObj.NumBytesAvailable > 0
-                    flushinput(app.arduinoObj);
-                    readline(app.arduinoObj);  % Read until next newline in case flush clears part of a line
-                    line = readline(app.arduinoObj); % Read a line of text
-                else
-                    line = [];
+                try
+                    if app.arduinoObj.NumBytesAvailable > 0
+                        flushinput(app.arduinoObj);
+                        readline(app.arduinoObj);  % Read until next newline in case flush clears part of a line
+                        line = readline(app.arduinoObj); % Read a line of text
+                    else
+                        line = [];
+                    end
+                catch err
+                    uialert(app.UIFigure, ...
+                        sprintf("Serial communication error encountered while retrieving Arduino Data: %s", err.message), ...
+                        "Serial Communication Error")
                 end
             end
 
-            pause(0.1); % Small delay to prevent CPU overuse
+            pause(app.PAUSE_LENGTH); % Small delay to prevent CPU overuse
         end
         
         function WaitForArduinoMessage(app)
@@ -1080,6 +1089,13 @@ classdef CCTA_exported < matlab.apps.AppBase
             %   Outputs:
             %       None
 
+            persistent prevPressureEnables prevFlowEnables
+
+            if isempty(prevPressureEnables)
+                prevPressureEnables = [false false false];
+                prevFlowEnables = [false false];
+            end
+
             % Plot data based on UI selections
             if app.PauseGraphsButton.Value == false && app.isConnected
                 hold(app.PressureAxes, 'on');
@@ -1135,9 +1151,14 @@ classdef CCTA_exported < matlab.apps.AppBase
                 % Axes labels and legend
                 xlabel(app.PressureAxes, 'Time (s)');
                 ylabel(app.PressureAxes, 'Pressure (mmHg)');
-                lgdPressure = legend(app.PressureAxes, 'show','Orientation','horizontal');
-                lgdPressure.Position = [0.1809    0.0426    0.6998    0.0520];
-                lgdPressure.FontSize = 8;
+                
+                currPressureEnables = [app.Pressure1_GraphEnable.Value, app.Pressure2_GraphEnable.Value, app.Pressure3_GraphEnable.Value];
+                if ~isequal(currPressureEnables, prevPressureEnables)
+                    lgdPressure = legend(app.PressureAxes, 'show','Orientation','horizontal');
+                    lgdPressure.Position = [0.1809    0.0426    0.6998    0.0520];
+                    lgdPressure.FontSize = 8;
+                    prevPressureEnables = currPressureEnables;
+                end
 
                 %% Plot flow data
                 hold(app.FlowAxes, 'on');
@@ -1177,12 +1198,17 @@ classdef CCTA_exported < matlab.apps.AppBase
                 xlabel(app.FlowAxes, 'Time (s)');
                 ylabel(app.FlowAxes, 'Flow (L/min)');
                 ylim(app.FlowAxes, [0 5]);
-                lgdFlow = legend(app.FlowAxes, 'show','Orientation','Horizontal');
-                lgdFlow.Position = [0.2496    0.0424    0.5516    0.0520];
-                lgdFlow.FontSize = 8;
+                
+                currFlowEnables = [app.Pressure1_GraphEnable.Value, app.Pressure2_GraphEnable.Value, app.Pressure3_GraphEnable.Value];
+                if ~isequal(currFlowEnables, prevFlowEnables)
+                    lgdFlow = legend(app.FlowAxes, 'show','Orientation','Horizontal');
+                    lgdFlow.Position = [0.2496    0.0424    0.5516    0.0520];
+                    lgdFlow.FontSize = 8;
+                    prevFlowEnables = currFlowEnables;
+                end
             end
 
-            pause(0.1);  % small pause to prevent CPU overuse
+            pause(app.PAUSE_LENGTH);  % small pause to prevent CPU overuse
         end
         
         function continueCalibration(app)
@@ -1411,7 +1437,9 @@ classdef CCTA_exported < matlab.apps.AppBase
             elseif percentPower == 0
                 app.PumpPowerSpinner.BackgroundColor = app.COLOR_ERROR;  % show error color when pump is off
             else
-                uialert("Invalid pump power was set: " + percentPower);
+                uialert(app.UIFigure, ...
+                    sprintf("Invalid pump power was attempted to be set: %.2f. Pump has been set to 0 percent power.",percentPower));
+                percentPower = 0;
             end
 
             app.PumpPowerSpinner.Value = percentPower;
@@ -1421,16 +1449,22 @@ classdef CCTA_exported < matlab.apps.AppBase
             % Calculate flow duty cycle value
             app.pumpDutyCycle = round(percentPower/100*app.ARDUINO_ANALOGWRITE_MAX);
 
-            % Send pump power command to Arduino
-            if ~isempty(app.arduinoObj)
-                flushoutput(app.arduinoObj);  % in case this was done in the middle of sending another command
-            end
+            try
+                % Send pump power command to Arduino
+                if ~isempty(app.arduinoObj)
+                    flushoutput(app.arduinoObj);  % in case this was done in the middle of sending another command
+                end
 
-            % Send command to Arduino
-            if app.SimulateDataCheckBox.Value == false && ~app.pumpStopped
-                command = sprintf("PMP: %d",app.pumpDutyCycle);
-                writeline(app.arduinoObj,command);
-                app.WaitForArduinoMessage();
+                % Send command to Arduino
+                if app.SimulateDataCheckBox.Value == false && ~app.pumpStopped
+                    command = sprintf("PMP: %d",app.pumpDutyCycle);
+                    writeline(app.arduinoObj,command);
+                    app.WaitForArduinoMessage();
+                end
+            catch err
+                uialert(app.UIFigure, ...
+                    sprintf("Error encountered while sending pump power command to Arduino: %s", err.message), ...
+                    "Serial Communication Error");
             end
         end
     end
@@ -1459,6 +1493,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.PID_errors = zeros(1, app.PID_ERRORS_LENGTH);
             app.UIFigure.Resize = 'off';
             app.PUMP_MIN_DUTY_CYCLE = app.PUMP_MIN_POWER_PID * app.ARDUINO_ANALOGWRITE_MAX;
+            app.pulsatileFlowValues = app.pulsatileFlowValues * (app.PUMP_MAX_FLOW / max(app.pulsatileFlowValues));  % scale pulsatile flow values to max pump flow rate
             app.PumpPowerSwitchValueChanged();
 
             % Update UI elements
@@ -1795,17 +1830,6 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.setPumpPower(pumpPowerPercent);
         end
 
-        % Value changed function: PumpControlModeSwitch
-        function PumpControlModeSwitchValueChanged(app, event)
-            value = app.PumpControlModeSwitch.Value;
-            app.setPumpControlMode(value);
-
-            if value == "Manual"
-                app.highlightSetPointUI("None");
-                app.PID_setpoint = "None";
-            end
-        end
-
         % Value changed function: SimulateDataCheckBox
         function SimulateDataCheckBoxValueChanged(app, event)
             value = app.SimulateDataCheckBox.Value;
@@ -1826,12 +1850,6 @@ classdef CCTA_exported < matlab.apps.AppBase
                     app.ConnectDisconnectButton.Enable = "off";
                 end
             end
-        end
-
-        % Callback function
-        function StartPulsatileFlowButtonValueChanged(app, event)
-            app.pulsatileFlowEnabled = app.StartPulsatileFlowButton.Value;
-            app.setPumpControlMode("Pulsatile");
         end
 
         % Value changed function: Pressure1_EditField_SHO
@@ -1979,20 +1997,6 @@ classdef CCTA_exported < matlab.apps.AppBase
             end
         end
 
-        % Callback function
-        function STOPPUMPButtonValueChanged(app, event)
-            value = app.STOPPUMPButton.Value;
-            
-            if value
-                app.pumpDutyCycle = 0;
-                app.CurrentPumpAnalogWriteValueEditField.Value = app.pumpDutyCycle;
-                app.setPumpControlMode("Manual");
-                app.pumpStopped = true;
-            else
-                app.pumpStopped = false;
-            end
-        end
-
         % Value changed function: RollingaveragedurationsEditField
         function RollingaveragedurationsEditFieldValueChanged(app, event)
             app.ROLLING_AVERAGE_DURATION = app.RollingaveragedurationsEditField.Value;
@@ -2008,25 +2012,41 @@ classdef CCTA_exported < matlab.apps.AppBase
 
         % Value changed function: PumpPowerSwitch
         function PumpPowerSwitchValueChanged(app, event)
-            app.setPumpPower(0);  % for safety
+            % For safety, return system to manual mode with the pump off
+            app.setPumpControlMode("Manual");
+            app.setPumpPower(0);
 
             if app.PumpPowerSwitch.Value == "Off"
                 app.PumpPowerSpinner.Enable = "off";
                 app.PumpPowerSlider.Enable = "off";
                 app.PumpPowerPercentLabel.Enable = "off";
-                app.PumpControlModeSwitch.Enable = "off";
-                app.PumpControlModeSwitchLabel.Enable = "off";
+                app.PumpControlModeDropDown.Enable = "off";
+                app.PumpControlModeDropdownLabel.Enable = "off";
                 app.PumpPowerLamp.Color = app.COLOR_LAMP_OFF;
                 app.pumpStopped = true;
             else
                 app.PumpPowerSpinner.Enable = "on";
                 app.PumpPowerSlider.Enable = "on";
                 app.PumpPowerPercentLabel.Enable = "on";
-                app.PumpControlModeSwitch.Enable = "on";
-                app.PumpControlModeSwitchLabel.Enable = "on";
+                app.PumpControlModeDropDown.Enable = "on";
+                app.PumpControlModeDropdownLabel.Enable = "on";
                 app.PumpPowerLamp.Color = app.COLOR_CONNECTED;
-                app.setPumpControlMode("Manual");
                 app.pumpStopped = false;
+            end
+        end
+
+        % Value changed function: PumpControlModeDropDown
+        function PumpControlModeDropDownValueChanged(app, event)
+            value = app.PumpControlModeDropDown.Value;
+
+            if value == "Auto"
+                uialert(app.UIFigure, ...
+                    "Please set a target pressure or flow rate by inputting a value in the appropriate ""Target"" box instead of selecting automatic control through this dropdown. The system has been switched back to Manual mode.", ...
+                    "Permission Denied", ...
+                    'Icon', 'warning');
+                app.setPumpControlMode("Manual");
+            else
+                app.setPumpControlMode(value);
             end
         end
     end
@@ -2476,60 +2496,60 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.PumpControlPanel.Enable = 'off';
             app.PumpControlPanel.BackgroundColor = [0.902 0.902 0.902];
             app.PumpControlPanel.FontWeight = 'bold';
-            app.PumpControlPanel.Position = [15 151 302 148];
+            app.PumpControlPanel.Position = [15 150 302 149];
 
             % Create PumpPowerSlider
             app.PumpPowerSlider = uislider(app.PumpControlPanel);
             app.PumpPowerSlider.ValueChangedFcn = createCallbackFcn(app, @PumpPowerSliderValueChanged, true);
             app.PumpPowerSlider.Enable = 'off';
             app.PumpPowerSlider.Tooltip = {'Sends a PWM signal to the pump from 0 to 100% power. 100% power represents the full voltage of your power supply.'};
-            app.PumpPowerSlider.Position = [129 44 150 3];
-
-            % Create PumpControlModeSwitch
-            app.PumpControlModeSwitch = uiswitch(app.PumpControlPanel, 'slider');
-            app.PumpControlModeSwitch.Items = {'Manual', 'Auto'};
-            app.PumpControlModeSwitch.ValueChangedFcn = createCallbackFcn(app, @PumpControlModeSwitchValueChanged, true);
-            app.PumpControlModeSwitch.Tooltip = {'Manual - control pump power using the slider below'; ''; 'Auto - Input a flow or pressure target value in the appropriate box underneath the graphs, and the system will automatically adjust'};
-            app.PumpControlModeSwitch.Position = [190 70 45 20];
-            app.PumpControlModeSwitch.Value = 'Manual';
+            app.PumpPowerSlider.Position = [129 45 150 3];
 
             % Create PumpPowerSpinner
             app.PumpPowerSpinner = uispinner(app.PumpControlPanel);
             app.PumpPowerSpinner.Limits = [0 100];
             app.PumpPowerSpinner.RoundFractionalValues = 'on';
             app.PumpPowerSpinner.ValueChangedFcn = createCallbackFcn(app, @PumpPowerSpinnerValueChanged, true);
-            app.PumpPowerSpinner.Position = [18 18 92 17];
+            app.PumpPowerSpinner.Position = [18 19 92 17];
 
             % Create PumpPowerSwitchLabel
             app.PumpPowerSwitchLabel = uilabel(app.PumpControlPanel);
             app.PumpPowerSwitchLabel.HorizontalAlignment = 'right';
             app.PumpPowerSwitchLabel.FontWeight = 'bold';
-            app.PumpPowerSwitchLabel.Position = [29 111 78 22];
+            app.PumpPowerSwitchLabel.Position = [31 112 78 22];
             app.PumpPowerSwitchLabel.Text = 'Pump Power';
 
             % Create PumpPowerSwitch
             app.PumpPowerSwitch = uiswitch(app.PumpControlPanel, 'slider');
             app.PumpPowerSwitch.ValueChangedFcn = createCallbackFcn(app, @PumpPowerSwitchValueChanged, true);
             app.PumpPowerSwitch.FontWeight = 'bold';
-            app.PumpPowerSwitch.Position = [190 111 45 20];
+            app.PumpPowerSwitch.Position = [184 113 45 20];
 
             % Create PumpPowerPercentLabel
             app.PumpPowerPercentLabel = uilabel(app.PumpControlPanel);
             app.PumpPowerPercentLabel.FontWeight = 'bold';
-            app.PumpPowerPercentLabel.Position = [15 37 100 22];
+            app.PumpPowerPercentLabel.Position = [15 38 100 22];
             app.PumpPowerPercentLabel.Text = 'Pump Power (%)';
 
-            % Create PumpControlModeSwitchLabel
-            app.PumpControlModeSwitchLabel = uilabel(app.PumpControlPanel);
-            app.PumpControlModeSwitchLabel.HorizontalAlignment = 'right';
-            app.PumpControlModeSwitchLabel.FontWeight = 'bold';
-            app.PumpControlModeSwitchLabel.Position = [26 71 82 22];
-            app.PumpControlModeSwitchLabel.Text = 'Control Mode';
+            % Create PumpControlModeDropdownLabel
+            app.PumpControlModeDropdownLabel = uilabel(app.PumpControlPanel);
+            app.PumpControlModeDropdownLabel.HorizontalAlignment = 'right';
+            app.PumpControlModeDropdownLabel.FontWeight = 'bold';
+            app.PumpControlModeDropdownLabel.Position = [26 72 82 22];
+            app.PumpControlModeDropdownLabel.Text = 'Control Mode';
 
             % Create PumpPowerLamp
             app.PumpPowerLamp = uilamp(app.PumpControlPanel);
-            app.PumpPowerLamp.Position = [271 112 20 20];
+            app.PumpPowerLamp.Position = [271 114 20 20];
             app.PumpPowerLamp.Color = [0.502 0.502 0.502];
+
+            % Create PumpControlModeDropDown
+            app.PumpControlModeDropDown = uidropdown(app.PumpControlPanel);
+            app.PumpControlModeDropDown.Items = {'Manual', 'Auto', 'Pulsatile'};
+            app.PumpControlModeDropDown.ValueChangedFcn = createCallbackFcn(app, @PumpControlModeDropDownValueChanged, true);
+            app.PumpControlModeDropDown.Tooltip = {'Choose how to control the pump:'; '- Manual: Set pump power yourself'; '- Auto: Use PID control to achieve targets'; '- Pulsatile: Simulate pulsatile flow'};
+            app.PumpControlModeDropDown.Position = [146 72 117 22];
+            app.PumpControlModeDropDown.Value = 'Manual';
 
             % Create FlowGraphPanel
             app.FlowGraphPanel = uipanel(app.MainTab);
