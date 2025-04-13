@@ -136,7 +136,7 @@ classdef CCTA_exported < matlab.apps.AppBase
         CALIBRATION_REST_PERIOD = 5;    % # of seconds to rest before collecting static heads for calibration
         DT_PID = 0.1;                   % Time step for integral/derivative PID calculations (adjust based on system response)
 
-        PAUSE_LENGTH = 0.01;  % For small pauses to prevent CPU overuse, duration of pause (s)
+        PAUSE_LENGTH = 0.1;  % For small pauses to prevent CPU overuse, duration of pause (s)
 
         % Colors
         COLOR_PRESSURE = [0.84 0.83 0.86];
@@ -153,31 +153,16 @@ classdef CCTA_exported < matlab.apps.AppBase
         COLOR_LAMP_OFF = [0.50,0.50,0.50];
         COLOR_EDITFIELD_DIMMED = [0.75 0.75 0.75];
 
-        appDir;
-
-        arduinoObj;
-        ports;
-        portsData;
-        isConnected;
-        tempLogFile = fullfile(pwd, 'console_output_temp.txt');  % Define a persistent temporary log file that always stores session history
-
-        t = [];
-        setpoint_vals = [];
-        setpoint_ids = [];
-
-        flow_vals1 = [];  % Containers for sensor data
-        flow_vals2 = [];
-
-        pressure_vals1 = [];
-        pressure_vals2 = [];
-        pressure_vals3 = [];
-
-        flow_vals1_avgs = string.empty;
-        flow_vals2_avgs = string.empty;
-
-        pressure_vals1_avgs = string.empty;
-        pressure_vals2_avgs = string.empty;
-        pressure_vals3_avgs = string.empty;
+        % Graphing
+        pressure1Line 
+        pressure2Line 
+        pressure3Line 
+        pressureTargetLine
+        pressureFill
+        flow1Line
+        flow2Line
+        flowTargetLine
+        flowFill
 
         % PID Variables
         Kp_flow = 5;  % PID coefficients when controlling flow
@@ -193,7 +178,35 @@ classdef CCTA_exported < matlab.apps.AppBase
         pumpStopped = true;
         PumpControlMode = 'Manual';
 
+        % Containers for sensor data
+        t = [];
+        mainLoopTime = [];
+        setpoint_vals = [];
+        setpoint_ids = [];
+
+        flow_vals1 = [];  
+        flow_vals2 = [];
+
+        pressure_vals1 = [];
+        pressure_vals2 = [];
+        pressure_vals3 = [];
+
+        flow_vals1_avgs = string.empty;
+        flow_vals2_avgs = string.empty;
+
+        pressure_vals1_avgs = string.empty;
+        pressure_vals2_avgs = string.empty;
+        pressure_vals3_avgs = string.empty;
+
         % Other variables
+        appDir;
+
+        arduinoObj;
+        ports;
+        portsData;
+        isConnected;
+        tempLogFile = fullfile(pwd, 'console_output_temp.txt');  % Define a persistent temporary log file that always stores session history
+
         rollingAverageCutoffTime;
 
         PUMP_MAX_FLOW = 5;  % L/min
@@ -256,7 +269,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             editField.BackgroundColor = originalColor;
         end
 
-        function [t, newFlowIndicator, flow_value1, ...
+        function [newFlowIndicator, flow_value1, ...
                 flow_value2, pressure_value_raw1, ...
                 pressure_value1, pressure_value_raw2, pressure_value2, ...
                 pressure_value_raw3, pressure_value3] = parseArduinoData(app, line)
@@ -282,8 +295,6 @@ classdef CCTA_exported < matlab.apps.AppBase
             %       P2                 - Calibrated pressure from sensor 2 (mmHg)
             %       P3R                - Raw ADC value from pressure sensor 3
             %       P3                 - Calibrated pressure from sensor 3 (mmHg)
-
-            t = toc;
 
             if isempty(line)
                 disp("No serial data received...")
@@ -340,7 +351,7 @@ classdef CCTA_exported < matlab.apps.AppBase
                         pump_analog_write);
 
                     % Print to console
-                    fprintf('%s', newLogEntry);
+                    % fprintf('%s', newLogEntry);
                 else
                     warning('Failed to parse expected number of values from serial data.');
                     disp(line);
@@ -448,7 +459,6 @@ classdef CCTA_exported < matlab.apps.AppBase
             if ~isempty(varargin)
                 duration = varargin{1};
                 timedMode = true;
-                tStart = tic;
                 
                 % Show loading bar while calibration runs
                 d = uiprogressdlg(app.UIFigure, ...
@@ -460,11 +470,16 @@ classdef CCTA_exported < matlab.apps.AppBase
                 timedMode = false;
             end
 
+            app.mainLoopTime = tic;
+            app.setUpDataPlots();
+
+            lastplotUpdate = tic;
+
             while app.isConnected
-                line = app.getArduinoData();
+                [tNew, line] = app.getArduinoData();
 
                 % Read sensor data
-                [tNew, ~, flow_value1, flow_value2, ...
+                [~, flow_value1, flow_value2, ...
                     ~, pressure_value1, ~, pressure_value2, ...
                     ~, pressure_value3] = app.parseArduinoData(line);
 
@@ -514,6 +529,8 @@ classdef CCTA_exported < matlab.apps.AppBase
 
                 % Update pressure/flow plots
                 app.updateDataPlots();
+                % fprintf("Plot Update: %.2f Hz (%.2f s) \n", 1/toc(lastplotUpdate), toc(lastplotUpdate));
+                % lastplotUpdate = tic;
 
                 % Update PID if in Auto mode
                 if app.PumpControlMode == "Auto"
@@ -527,7 +544,7 @@ classdef CCTA_exported < matlab.apps.AppBase
                 % If duration mode, break when time is up, otherwise update
                 % loading bar
                 if timedMode
-                    tElapsed = toc(tStart);
+                    tElapsed = toc(app.mainLoopTime);
                     if tElapsed >= duration
                         close(d);
                         break
@@ -777,7 +794,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.WaitForArduinoMessage();
         end
         
-        function line = getArduinoData(app)
+        function [t, line] = getArduinoData(app)
             %GETARDUINODATA Retrieves a line of sensor data from the Arduino.
             %
             %   LINE = GETARDUINODATA() reads one line of serial data from the Arduino.
@@ -792,12 +809,14 @@ classdef CCTA_exported < matlab.apps.AppBase
             if app.SimulateDataCheckBox.Value
                 % Simulate data in GUI (for testing)
                 line = "NF: N, F1: 1.50 L/min, F2: 2.50 L/min, P1R: 1023, P1: 20 mmHg, P2R: 1023, P2: 50 mmHg, P3R: 1023, P3: 80 mmHg, Pump: 128/255\n";
+                t = toc(app.mainLoopTime);
             else
                 try
                     if app.arduinoObj.NumBytesAvailable > 0
                         flushinput(app.arduinoObj);
                         readline(app.arduinoObj);  % Read until next newline in case flush clears part of a line
                         line = readline(app.arduinoObj); % Read a line of text
+                        t = toc(app.mainLoopTime);
                     else
                         line = [];
                     end
@@ -807,8 +826,6 @@ classdef CCTA_exported < matlab.apps.AppBase
                         "Serial Communication Error")
                 end
             end
-
-            pause(app.PAUSE_LENGTH); % Small delay to prevent CPU overuse
         end
         
         function WaitForArduinoMessage(app)
@@ -950,6 +967,8 @@ classdef CCTA_exported < matlab.apps.AppBase
                 app.ConnectedLamp.Color = app.COLOR_ERROR;
                 app.isConnected = false;
                 app.SimulateDataCheckBox.Enable = "on";  % in case it was disabled before
+                app.PauseGraphsButton.Value = false;
+                app.PauseGraphsButtonValueChanged();
 
                 % Reset pressure and flow fields
                 app.Pressure1_EditField_Current.Value = 0;
@@ -1078,137 +1097,95 @@ classdef CCTA_exported < matlab.apps.AppBase
         function updateDataPlots(app)
             %UPDATEDATAPLOTS Updates pressure and flow plots with current data.
             %
-            %   UPDATEDATAPLOTS() clears and redraws the pressure and flow axes based
-            %   on enabled signals and active setpoint. It includes real-time values,
-            %   rolling average shading, and automatic y-axis scaling. Legends and
-            %   labels are also updated for clarity.
-            %
-            %   Inputs:
-            %       None
-            %
-            %   Outputs:
-            %       None
+            %   UPDATEDATAPLOTS() updates existing plot data instead of redrawing axes.
+            %   Only updates legends if visibility toggles have changed.
 
-            persistent prevPressureEnables prevFlowEnables
-
-            if isempty(prevPressureEnables)
-                prevPressureEnables = [false false false];
-                prevFlowEnables = [false false];
+            if app.PauseGraphsButton.Value == true || ~app.isConnected
+                drawnow;
+                return;
             end
 
-            % Plot data based on UI selections
-            if app.PauseGraphsButton.Value == false && app.isConnected
-                hold(app.PressureAxes, 'on');
-                cla(app.PressureAxes); % Clear previous plots
+            currentTime = app.t(end);
+            cutoffTime = app.rollingAverageCutoffTime;
 
-                if strcmp(app.PressureAxesWaitingForConnectionLabel.Visible,'on')
-                    % Hide "Waiting for Connection" labels on graphs if
-                    % they're still visible (i.e. first time plotting)
-                    app.PressureAxesWaitingForConnectionLabel.Visible = 'off';
-                    app.FlowAxesWaitingForConnectionLabel.Visible = 'off';
-                end
-
-                lineWidth = 2;
-
-                % Collect time values for rolling average shading
-                currentTime = app.t(end);
-                cutoffTime = app.rollingAverageCutoffTime;
-
-                %% Plot pressure data
-                if app.Pressure1_GraphEnable.Value
-                    plot(app.PressureAxes, app.t, app.pressure_vals1, 'Color', app.COLOR_PRESSURE_2, 'DisplayName', app.pressure1_label, 'LineWidth', lineWidth);
-                end
-                if app.Pressure2_GraphEnable.Value
-                    plot(app.PressureAxes, app.t, app.pressure_vals2, 'Color', app.COLOR_PRESSURE*0.5, 'DisplayName', app.pressure2_label, 'LineWidth', lineWidth);
-                end
-                if app.Pressure3_GraphEnable.Value
-                    plot(app.PressureAxes, app.t, app.pressure_vals3, 'Color', [0 0 0], 'DisplayName', app.pressure3_label, 'LineWidth', lineWidth);
-                end
-
-                if contains(app.PID_setpoint_id,"Pressure")
-                    plot(app.PressureAxes, app.t, ones(1,length(app.t))*app.PID_setpoint, '--r', 'DisplayName', 'Target', 'LineWidth', lineWidth)
-                end
-
-                % Determine appropriate y-limit
-                if contains(app.PID_setpoint_id,"Pressure")
-                    pressureMax = max([app.pressure_vals1, app.pressure_vals2, app.pressure_vals3, app.PID_setpoint]);  % if setpoint is for pressure adjust y-limit appropriately
-                else
-                    pressureMax = max([app.pressure_vals1, app.pressure_vals2, app.pressure_vals3]);
-                end
-                
-                pressureMin = 0;
-                pressureDefaultMax = 100;
-                pressureMax = max(pressureDefaultMax, pressureMax * 1.1);  % Add 10% headroom
-                ylim(app.PressureAxes, [pressureMin pressureMax]);
-
-                % Shade area corresponding to rolling average
-                ylims = ylim(app.PressureAxes);
-                x_fill = [cutoffTime, currentTime, currentTime, cutoffTime];
-                y_fill = [ylims(1), ylims(1), ylims(2), ylims(2)];
-                fill(app.PressureAxes, x_fill, y_fill, app.COLOR_PRESSURE*0.6, 'FaceAlpha', 0.2, 'EdgeColor', 'none', 'DisplayName', 'Roll. Avg.');
-                hold(app.PressureAxes, 'off');
-
-                % Axes labels and legend
-                xlabel(app.PressureAxes, 'Time (s)');
-                ylabel(app.PressureAxes, 'Pressure (mmHg)');
-                
-                currPressureEnables = [app.Pressure1_GraphEnable.Value, app.Pressure2_GraphEnable.Value, app.Pressure3_GraphEnable.Value];
-                if ~isequal(currPressureEnables, prevPressureEnables)
-                    lgdPressure = legend(app.PressureAxes, 'show','Orientation','horizontal');
-                    lgdPressure.Position = [0.1809    0.0426    0.6998    0.0520];
-                    lgdPressure.FontSize = 8;
-                    prevPressureEnables = currPressureEnables;
-                end
-
-                %% Plot flow data
-                hold(app.FlowAxes, 'on');
-                cla(app.FlowAxes); % Clear previous plots
-
-                if app.Flow1_GraphEnable.Value
-                    plot(app.FlowAxes, app.t, app.flow_vals1, 'Color', app.COLOR_FLOW*0.7, 'DisplayName', app.flow1_label, 'LineWidth', lineWidth);
-                end
-                if app.Flow2_GraphEnable.Value
-                    plot(app.FlowAxes, app.t, app.flow_vals2, 'Color', [0 0 0], 'DisplayName', app.flow2_label, 'LineWidth', lineWidth);
-                end
-
-                if contains(app.PID_setpoint_id,"Flow")
-                    plot(app.FlowAxes, app.t, ones(1,length(app.t))*app.PID_setpoint, '--r', 'DisplayName', 'Target', 'LineWidth', lineWidth)
-                end
-
-                % Determine appropriate y-limit
-                if contains(app.PID_setpoint_id, "Flow")
-                    flowMax = max([app.flow_vals1, app.flow_vals2, app.PID_setpoint]);  % if setpoint is for flow adjust y-limit appropriately
-                else
-                    flowMax = max([app.flow_vals1, app.flow_vals2]);
-                end
-                flowMin = 0;
-                flowDefaultMax = 5;
-                flowMax = max(flowDefaultMax, flowMax * 1.1);  % Add 10% headroom
-                ylim(app.FlowAxes, [flowMin flowMax]);
-
-                % Shade area corresponding to rolling average
-                ylims = ylim(app.FlowAxes);
-                x_fill = [cutoffTime, currentTime, currentTime, cutoffTime];
-                y_fill = [ylims(1), ylims(1), ylims(2), ylims(2)];
-                fill(app.FlowAxes, x_fill, y_fill, app.COLOR_FLOW*0.6, 'FaceAlpha', 0.2, 'EdgeColor', 'none', 'DisplayName', 'Roll. Avg.');
-                hold(app.FlowAxes, 'off');
-
-                % Axes labels and legend
-                hold(app.FlowAxes, 'off');
-                xlabel(app.FlowAxes, 'Time (s)');
-                ylabel(app.FlowAxes, 'Flow (L/min)');
-                ylim(app.FlowAxes, [0 5]);
-                
-                currFlowEnables = [app.Pressure1_GraphEnable.Value, app.Pressure2_GraphEnable.Value, app.Pressure3_GraphEnable.Value];
-                if ~isequal(currFlowEnables, prevFlowEnables)
-                    lgdFlow = legend(app.FlowAxes, 'show','Orientation','Horizontal');
-                    lgdFlow.Position = [0.2496    0.0424    0.5516    0.0520];
-                    lgdFlow.FontSize = 8;
-                    prevFlowEnables = currFlowEnables;
-                end
+            %% PRESSURE AXES
+            % Update pressure lines
+            if app.Pressure1_GraphEnable.Value
+                set(app.pressure1Line, 'XData', app.t, 'YData', app.pressure_vals1);
+            else
+                set(app.pressure1Line, 'XData', nan, 'YData', nan);
+            end
+            if app.Pressure2_GraphEnable.Value
+                set(app.pressure2Line, 'XData', app.t, 'YData', app.pressure_vals2);
+            else
+                set(app.pressure2Line, 'XData', nan, 'YData', nan);
+            end
+            if app.Pressure3_GraphEnable.Value
+                set(app.pressure3Line, 'XData', app.t, 'YData', app.pressure_vals3);
+            else
+                set(app.pressure3Line, 'XData', nan, 'YData', nan);
             end
 
-            pause(app.PAUSE_LENGTH);  % small pause to prevent CPU overuse
+            if contains(app.PID_setpoint_id, "Pressure")
+                set(app.pressureTargetLine, 'XData', app.t, 'YData', ones(1,length(app.t))*app.PID_setpoint);
+            else
+                set(app.pressureTargetLine, 'XData', nan, 'YData', nan);
+            end
+
+            % Determine appropriate y-limit
+            if contains(app.PID_setpoint_id,"Pressure")
+                pressureMax = max([app.pressure_vals1, app.pressure_vals2, app.pressure_vals3, app.PID_setpoint]);  % if setpoint is for pressure adjust y-limit appropriately
+            else
+                pressureMax = max([app.pressure_vals1, app.pressure_vals2, app.pressure_vals3]);
+            end
+
+            % Determine appropriate y-limit
+            pressureMin = 0;
+            pressureDefaultMax = 100;
+            pressureMax = max(pressureDefaultMax, pressureMax * 1.1);  % Add 10% headroom
+            ylim(app.PressureAxes, [pressureMin pressureMax]);
+
+            ylims = ylim(app.PressureAxes);
+            x_fill = [cutoffTime, currentTime, currentTime, cutoffTime];
+            y_fill = [ylims(1), ylims(1), ylims(2), ylims(2)];
+            set(app.pressureFill, 'XData', x_fill, 'YData', y_fill);
+
+            % Update flow lines
+            if app.Flow1_GraphEnable.Value
+                set(app.flow1Line, 'XData', app.t, 'YData', app.flow_vals1);
+            else
+                set(app.flow1Line, 'XData', nan, 'YData', nan);
+            end
+            if app.Flow2_GraphEnable.Value
+                set(app.flow2Line, 'XData', app.t, 'YData', app.flow_vals2);
+            else
+                set(app.flow2Line, 'XData', nan, 'YData', nan);
+            end
+
+            if contains(app.PID_setpoint_id, "Flow")
+                set(app.flowTargetLine, 'XData', app.t, 'YData', ones(1,length(app.t))*app.PID_setpoint);
+            else
+                set(app.flowTargetLine, 'XData', nan, 'YData', nan);
+            end
+
+            % Determine appropriate y-limit
+            if contains(app.PID_setpoint_id, "Flow")
+                flowMax = max([app.flow_vals1, app.flow_vals2, app.PID_setpoint]);  % if setpoint is for flow adjust y-limit appropriately
+            else
+                flowMax = max([app.flow_vals1, app.flow_vals2]);
+            end
+            flowMin = 0;
+            flowDefaultMax = 5;
+            flowMax = max(flowDefaultMax, flowMax * 1.1);  % Add 10% headroom
+            ylim(app.FlowAxes, [flowMin flowMax]);
+
+            % Shade area corresponding to rolling average
+            ylims = ylim(app.FlowAxes);
+            x_fill = [cutoffTime, currentTime, currentTime, cutoffTime];
+            y_fill = [ylims(1), ylims(1), ylims(2), ylims(2)];
+            set(app.flowFill, 'XData', x_fill, 'YData', y_fill);
+
+            drawnow limitrate;
         end
         
         function continueCalibration(app)
@@ -1467,6 +1444,55 @@ classdef CCTA_exported < matlab.apps.AppBase
                     "Serial Communication Error");
             end
         end
+        
+        function setUpDataPlots(app)
+            % Hide "Waiting for Connection" labels if visible
+            if strcmp(app.PressureAxesWaitingForConnectionLabel.Visible, 'on')
+                app.PressureAxesWaitingForConnectionLabel.Visible = 'off';
+                app.FlowAxesWaitingForConnectionLabel.Visible = 'off';
+            end
+
+            cla(app.PressureAxes);
+            cla(app.FlowAxes);
+            legend(app.PressureAxes,'off');
+            legend(app.FlowAxes,'off');
+
+            hold(app.PressureAxes, 'on');
+            hold(app.FlowAxes, 'on');
+
+            lineWidth = 2;
+
+            % Initialize pressure plot lines and fill with NaNs
+            app.pressure1Line = plot(app.PressureAxes, nan, nan, 'Color', app.COLOR_PRESSURE_2, 'DisplayName', app.pressure1_label, 'LineWidth', lineWidth);
+            app.pressure2Line = plot(app.PressureAxes, nan, nan, 'Color', app.COLOR_PRESSURE*0.5, 'DisplayName', app.pressure2_label, 'LineWidth', lineWidth);
+            app.pressure3Line = plot(app.PressureAxes, nan, nan, 'Color', [0 0 0], 'DisplayName', app.pressure3_label, 'LineWidth', lineWidth);
+            app.pressureTargetLine = plot(app.PressureAxes, nan, nan, 'r--', 'DisplayName', 'Target', 'LineWidth', lineWidth);
+            app.pressureFill = fill(app.PressureAxes, nan(1,4), nan(1,4), app.COLOR_PRESSURE*0.6, 'FaceAlpha', 0.2, 'EdgeColor', 'none', 'DisplayName', 'Roll. Avg.');
+
+            xlabel(app.PressureAxes, 'Time (s)');
+            ylabel(app.PressureAxes, 'Pressure (mmHg)');
+
+            lgdPressure = legend(app.PressureAxes, 'show','Orientation','horizontal');
+            lgdPressure.Position = [0.1809    0.0426    0.6998    0.0520];
+            lgdPressure.FontSize = 8;
+
+            % Initialize flow plot lines and fill with NaNs
+            app.flow1Line = plot(app.FlowAxes, nan, nan, 'Color', app.COLOR_FLOW*0.7, 'DisplayName', app.flow1_label, 'LineWidth', lineWidth);
+            app.flow2Line = plot(app.FlowAxes, nan, nan, 'Color', [0 0 0], 'DisplayName', app.flow2_label, 'LineWidth', lineWidth);
+            app.flowTargetLine = plot(app.FlowAxes, nan, nan, 'r--', 'DisplayName', 'Target', 'LineWidth', lineWidth);
+            app.flowFill = fill(app.FlowAxes, nan(1,4), nan(1,4), app.COLOR_FLOW*0.6, 'FaceAlpha', 0.2, 'EdgeColor', 'none', 'DisplayName', 'Roll. Avg.');
+
+            xlabel(app.FlowAxes, 'Time (s)');
+            ylabel(app.FlowAxes, 'Flow (L/min)');
+
+            lgdFlow = legend(app.FlowAxes, 'show','Orientation','Horizontal');
+            lgdFlow.Position = [0.2496    0.0424    0.5516    0.0520];
+            lgdFlow.FontSize = 8;
+
+            lgdPressure.AutoUpdate = "off";
+            lgdFlow.AutoUpdate = "off";
+            
+        end
     end
 
 
@@ -1541,6 +1567,7 @@ classdef CCTA_exported < matlab.apps.AppBase
 
             tic;
             app.clearDataArrays();
+            app.setUpDataPlots();
 
             if toc < 1
                 pause(1);  % Pause 1 second if data was cleared quickly, to give user feedback
@@ -1985,6 +2012,8 @@ classdef CCTA_exported < matlab.apps.AppBase
         % Value changed function: PauseGraphsButton
         function PauseGraphsButtonValueChanged(app, event)
             value = app.PauseGraphsButton.Value;
+
+            drawnow;
             
             if value == true
                 app.PauseGraphsButton.BackgroundColor = app.COLOR_DISCONNECTED;
