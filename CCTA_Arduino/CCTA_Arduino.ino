@@ -26,13 +26,14 @@ const unsigned char PRESSURE_SENSOR_PIN3 = A3;  // Pressure sensor 3 input pin
 const unsigned long PRESSURE_SENSOR_READ_INTERVAL = 50.;  // Interval for pressure readings (ms)
 const unsigned long FLOW_SENSOR_READ_INTERVAL = 2000.;    // Interval for flow readings (ms); assumed to be many times larger than PRESSURE_SENSOR_READ_INTERVAL
 const unsigned long EXPECTED_MATLAB_MESSAGE_LENGTH = 50;  // Length of message (# chars) expected from MATLAB for pump control
+const unsigned long MAX_DUTY_CYCLE = 255;  // 10-bit ADC on Arduino Uno
 
 const bool SIMULATE_VALUES = false;       // whether simulated values should be sent over serial (for testing GUI without physical setup)
 const bool SIMULATE_OSCILLATIONS = true;  // whether simulated values (if enabled) should oscillate sinusoidally over time
 
 // Variables
-volatile int flow1_pulses = 0;      // Flow sensor 1 pulse count
-volatile int flow2_pulses = 0;      // Flow sensor 2 pulse count
+volatile int flow1_pulses = 0;         // Flow sensor 1 pulse count
+volatile int flow2_pulses = 0;         // Flow sensor 2 pulse count
 unsigned long currentTime;             // placeholder for current time (ms)
 unsigned long flowSensorTime = 0;      // time of last flow sensor measurement (ms)
 unsigned long pressureSensorTime = 0;  // time of last pressure sensor measurement (ms)
@@ -45,6 +46,10 @@ char newFlowIndicator = 'N';                                              // Ind
 int pumpDutyCycle = 0;        // PWM duty cycle for pump (0 on startup for safety)
 String inputString = "";      // a String to hold incoming pump commands from GUI
 bool stringComplete = false;  // whether the string is complete
+
+int pulsatileBPM = 60;           // beats per minute for pulsatile flow
+int pulsatileAmplitude = 0.8;    // max duty cycle for pulses (0 to 255)
+bool pulsatileFlowEnabled = false;
 
 /**
  * Interrupt service routines for the flow sensors.
@@ -95,6 +100,10 @@ void loop() {
     simulateDataValues(SIMULATE_OSCILLATIONS);
   } else {
     readSensorValues();
+  }
+
+  if (pulsatileFlowEnabled) {
+    setPulsatileFlow();
   }
 
   sendSystemData();
@@ -168,20 +177,37 @@ void serialEvent() {
     // if the incoming character is a newline, process the full line then reset the string
     if (inChar == '\n') {
       processSerial(inputString);
-      inputString = "";  
+      inputString = "";
     }
+    // TODO: Add error in case new line hasn't been received in a while, or if the input string is absurdly long
   }
 }
 
 /*
- * Processes serial command string to control pump duty cycle.
- * Sample input string: "PMP: 244"
+ * Processes serial command strings sent from GUI
 */
 void processSerial(String inputString) {
 
   // Extract pump duty cycle and write to analog pin
   if (sscanf(inputString.c_str(), "PMP: %d", &pumpDutyCycle) == 1) {
+    Serial.print("RECEIVED pump duty cycle: ");
+    Serial.print(pumpDutyCycle);
+    Serial.println("/255");
+
+    pulsatileFlowEnabled = false;
+
     analogWrite(PUMP_PWM_PIN, pumpDutyCycle);
+  } else if (sscanf(inputString.c_str(), "PULSE: %d, %d", &pulsatileBPM, &pulsatileAmplitude) == 2) {
+    Serial.print("RECEIVED pulsatile flow settings (BPM: ");
+    Serial.print(pulsatileBPM);
+    Serial.print(", amplitude: ");
+    Serial.print(pulsatileAmplitude);
+    Serial.println(")");
+
+    pulsatileFlowEnabled = true;
+  } else {
+    Serial.print("ERROR: Unrecognized message: ");
+    Serial.println(inputString);
   }
 
   inputString = "";  // Clear input string
@@ -257,7 +283,7 @@ float interpolatePressure(float adc_value, int sensorNum) {
     adc_values = adc_values3;
     pressure_mmHg = pressure_mmHg3;
     size = 18;
-  } else { 
+  } else {
     // use sensor 1 values
     adc_values = adc_values1;
     pressure_mmHg = pressure_mmHg1;
@@ -286,10 +312,29 @@ float interpolatePressure(float adc_value, int sensorNum) {
 }
 
 /*
-* Sends system data over serial, including flow readings, raw/converted pressure readings, and pump duty cycle.
-* 
-* Sample message: "NF: Y, F1: 0.523 L/min, F2: 1.532 L/min, P1R: 938, P1: 120.2 mmHg, P2R: 231, P2: 17.4 mmHg, P3R: 432, P3: 40.2 mmHg, Pump: 128/255"
+* Enables pulsatile flow (i.e. sinusoidal oscillations in pump power) according to system BPM and amplitude for pulsatile flow
 */
+void setPulsatileFlow() {
+  float beatsPerSecond = pulsatileBPM / 60.0;
+  float periodMs = 1000.0 / beatsPerSecond;  // period of one beat in ms
+
+  float timeInSeconds = (currentTime % (unsigned long)periodMs) / 1000.0;
+  float angle = timeInSeconds * 2 * PI * beatsPerSecond;
+
+  // Generate sine wave from 0 to pulsatileAmplitude
+  float rawSine = 0.5 * (1 + sin(angle));
+  pumpDutyCycle = (int)round(pulsatileAmplitude * rawSine);
+
+  analogWrite(PUMP_PWM_PIN, pumpDutyCycle);
+}
+
+/*
+ * Sends system data over serial, including flow readings, raw/converted pressure readings, 
+ * pump duty cycle, and pulsatile flow parameters.
+ * 
+ * Sample message: 
+ * "NF: N, F1: 0.00, F2: 0.00, P1R: 783, P1: 86.65, P2R: 9, P2: -1.28, P3R: 449, P3: 57.24 | PMP: 200 | PULSE: N, BPM: 30, AMP: 200"
+ */
 void sendSystemData() {
 
   // Flow data
@@ -297,33 +342,36 @@ void sendSystemData() {
   Serial.print(newFlowIndicator);
   Serial.print(", F1: ");
   Serial.print(flowRate1);
-  Serial.print(" L/min");
   Serial.print(", F2: ");
   Serial.print(flowRate2);
-  Serial.print(" L/min");
 
   // Pressure sensor 1
   Serial.print(", P1R: ");
   Serial.print(pressureValueRaw1);
   Serial.print(", P1: ");
   Serial.print(pressureValue1);
-  Serial.print(" mmHg");
 
   // Pressure sensor 2
   Serial.print(", P2R: ");
   Serial.print(pressureValueRaw2);
   Serial.print(", P2: ");
   Serial.print(pressureValue2);
-  Serial.print(" mmHg");
 
   // Pressure sensor 3
   Serial.print(", P3R: ");
   Serial.print(pressureValueRaw3);
   Serial.print(", P3: ");
   Serial.print(pressureValue3);
-  Serial.print(" mmHg");
 
-  Serial.print(", Pump: ");
+  // Pump duty cycle
+  Serial.print(" | PMP: ");
   Serial.print(pumpDutyCycle);
-  Serial.println("/255");
+  
+  // Pulsatile flow parameters
+  Serial.print(" | PULSE: ");
+  Serial.print(pulsatileFlowEnabled ? "Y" : "N");
+  Serial.print(", BPM: ");
+  Serial.print(pulsatileBPM);
+  Serial.print(", AMP: ");
+  Serial.println(pulsatileAmplitude);
 }

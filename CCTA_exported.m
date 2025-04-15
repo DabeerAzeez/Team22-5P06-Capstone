@@ -25,6 +25,9 @@ classdef CCTA_exported < matlab.apps.AppBase
         FlowAxesWaitingForConnectionLabel  matlab.ui.control.Label
         FlowAxes                       matlab.ui.control.UIAxes
         PumpControlPanel               matlab.ui.container.Panel
+        PulseBPMLabel                  matlab.ui.control.Label
+        PulseBPMSpinner                matlab.ui.control.Spinner
+        PulseBPMSlider                 matlab.ui.control.Slider
         PumpControlModeDropDown        matlab.ui.control.DropDown
         PumpPowerLamp                  matlab.ui.control.Lamp
         PumpControlModeDropdownLabel   matlab.ui.control.Label
@@ -128,13 +131,16 @@ classdef CCTA_exported < matlab.apps.AppBase
         % TODO: Add more UI elements to be able to change these through UI
         ARDUINO_ANALOGWRITE_MAX = 255;
         ARDUINO_SERIAL_BITRATE = 115200;
-        PUMP_MIN_POWER_PID = 0.1;       % minimum pump power before flow stops - used for PID limits
+        PUMP_MIN_POWER_PID = 0.10;       % minimum pump power before flow stops - used for PID limits
         PUMP_MIN_DUTY_CYCLE;
         PID_ERRORS_LENGTH = 75;         % # of error values to use for PID integral calculations, determined empirically to minimize settling time
         CALIBRATION_DURATION = 20;      % # of seconds to run calibration procedure
         ROLLING_AVERAGE_DURATION = 10;  % # of seconds for rolling average
         CALIBRATION_REST_PERIOD = 5;    % # of seconds to rest before collecting static heads for calibration
         DT_PID = 0.1;                   % Time step for integral/derivative PID calculations (adjust based on system response)
+
+        PULSATILE_DEFAULT_BPM = 40;
+        PULSATILE_DEFAULT_POWER = 100;
 
         PAUSE_LENGTH = 0.1;  % For small pauses to prevent CPU overuse, duration of pause (s)
 
@@ -211,8 +217,8 @@ classdef CCTA_exported < matlab.apps.AppBase
 
         PUMP_MAX_FLOW = 5;  % L/min
         pulsatileFlowEnabled = false;
-        pulsatileFlowValues = [0, 6.8, 4.7, 3.5, 4.7, 5.8, 2.5, 0];  % from Johnson et. al (https://pmc.ncbi.nlm.nih.gov/articles/PMC8757711/#s9), scaled to max ~5 L/min for current pump
-        pulsatileFlowTimes = [0, 0.15, 0.25, 0.4, 0.42, 0.55, 0.7, 1];
+        pulsatileFlowValues;
+        pulsatileFlowTimes;
         pulsatileFlowPeriod;
 
         SHO_Pressure1 = 0;
@@ -269,98 +275,90 @@ classdef CCTA_exported < matlab.apps.AppBase
             editField.BackgroundColor = originalColor;
         end
 
-        function [newFlowIndicator, flow_value1, ...
-                flow_value2, pressure_value_raw1, ...
-                pressure_value1, pressure_value_raw2, pressure_value2, ...
-                pressure_value_raw3, pressure_value3] = parseArduinoData(app, line)
+        function [newFlowIndicator, flow_value1, flow_value2, ...
+                pressure_value1, pressure_value2, pressure_value3] = parseArduinoData(app, line)
 
-            %PARSEARDUINODATA Parses a line of serial data from the Arduino.
+            % PARSEARDUINODATA Parses a line of serial data from the Arduino.
             %
-            %   [T, NEWFLOWINDICATOR, FLOW1, FLOW2, P1R, P1, P2R, P2, P3R, P3] =
-            %   PARSEARDUINODATA(LINE) extracts flow and pressure values from the given
-            %   LINE of serial data sent by the Arduino. It also applies static head
-            %   offset corrections and logs the data with a timestamp.
-            %
+            %   [NEWFLOWINDICATOR, FLOW1, FLOW2, P1, P2, P3] = PARSEARDUINODATA(LINE)
+            %   Extracts flow and pressure values from the given LINE of serial data sent
+            %   by the Arduino. Applies static head offset corrections and logs the data.
+            %   
             %   Inputs:
             %       LINE - A string containing the raw serial message from the Arduino
             %
             %   Outputs:
-            %       T                  - Timestamp (in seconds since tic)
             %       NEWFLOWINDICATOR  - 'Y' if new flow data, 'N' or 'X' otherwise
             %       FLOW1              - Flow rate from sensor 1 (L/min)
             %       FLOW2              - Flow rate from sensor 2 (L/min)
-            %       P1R                - Raw ADC value from pressure sensor 1
             %       P1                 - Calibrated pressure from sensor 1 (mmHg)
-            %       P2R                - Raw ADC value from pressure sensor 2
             %       P2                 - Calibrated pressure from sensor 2 (mmHg)
-            %       P3R                - Raw ADC value from pressure sensor 3
             %       P3                 - Calibrated pressure from sensor 3 (mmHg)
 
-            if isempty(line)
-                disp("No serial data received...")
-                newFlowIndicator = 'X';   % 'Y' or 'N'
-                flow_value1 = -999;
-                flow_value2 = -999;
-                pressure_value_raw1 = -999;
-                pressure_value1 = -999;
-                pressure_value_raw2 = -999;
-                pressure_value2 = -999;
-                pressure_value_raw3 = -999;
-                pressure_value3 = -999;
+            % Handle special messages first
+            if ~isempty(line)
+                if contains(line, "ERROR")
+                    uialert(app.UIFigure, ...
+                        sprintf("Error message received from Arduino: %s", line), ...
+                        "Arduino Error Received");
+                    return;
+                elseif contains(line, "RECEIVED")
+                    % Reuse last known values to prevent random dips in data plots
+                    newFlowIndicator = 'N';
+                    flow_value1 = app.flow_vals1(end);
+                    flow_value2 = app.flow_vals2(end);
+                    pressure_value1 = app.pressure_vals1(end);
+                    pressure_value2 = app.pressure_vals2(end);
+                    pressure_value3 = app.pressure_vals3(end);
+                    return;
+                end
             end
 
-            % Attempt to parse the serial data
             try
-                % Ensure we received all expected values
-                data = sscanf(line, ...
-                    ['NF: %c, F1: %f L/min, F2: %f L/min, ' ...
-                    'P1R: %d, P1: %f mmHg, ' ...
-                    'P2R: %d, P2: %f mmHg, ' ...
-                    'P3R: %d, P3: %f mmHg, ' ...
-                    'Pump: %d/255\n']);
-
-                % Ensure we received all expected values
-                if numel(data) == 10
-                    newFlowIndicator = char(data(1));  % 'Y' or 'N'
-                    flow_value1 = data(2);
-                    flow_value2 = data(3);
-                    pressure_value_raw1 = data(4);
-                    pressure_value1 = data(5) - app.SHO_Pressure1;  % apply Static Head Offsets
-                    pressure_value_raw2 = data(6);
-                    pressure_value2 = data(7) - app.SHO_Pressure2;
-                    pressure_value_raw3 = data(8);
-                    pressure_value3 = data(9) - app.SHO_Pressure3;
-                    pump_analog_write = data(10);
-
-                    % Get timestamp
-                    timestamp = datetime("now");
-
-                    % Format the new sensor data as a string
-                    newLogEntry = sprintf(['===== Sensor Data (%s) =====\n', ...
-                        'NF: %c\n', ...
-                        'F1: %.2f L/min, F2: %.2f L/min\n', ...
-                        'P1R: %d, P1: %.2f mmHg\n', ...
-                        'P2R: %d, P2: %.2f mmHg\n', ...
-                        'P3R: %d, P3: %.2f mmHg\n', ...
-                        'Pump: %d/255\n'], ...
-                        timestamp, newFlowIndicator, ...
-                        flow_value1, flow_value2, ...
-                        pressure_value_raw1, pressure_value1, ...
-                        pressure_value_raw2, pressure_value2, ...
-                        pressure_value_raw3, pressure_value3, ...
-                        pump_analog_write);
-
-                    % Print to console
-                    % fprintf('%s', newLogEntry);
-                else
-                    warning('Failed to parse expected number of values from serial data.');
-                    disp(line);
+                % Raise error if line is empty
+                if isempty(line)
+                    error("Empty serial line received.");
                 end
-            catch
-                warning('Error reading and parsing serial data.');
+
+                % Try parsing the line
+                data = sscanf(line, ...
+                    ['NF: %c, F1: %f, F2: %f, ' ...
+                    'P1R: %d, P1: %f, ' ...
+                    'P2R: %d, P2: %f, ' ...
+                    'P3R: %d, P3: %f ' ...
+                    '| PMP: %d ' ...
+                    '| PULSE: %c, BPM: %d, AMP: %d\n']);
+
+                % Validate number of data points
+                nExpectedDataPoints = 13;
+                if numel(data) ~= nExpectedDataPoints
+                    error("Expected %d values but got %d. Line: %s", nExpectedDataPoints, numel(data), line);
+                end
+
+                % Assign parsed values
+                newFlowIndicator = char(data(1));        % 'Y' or 'N'
+                flow_value1 = data(2);
+                flow_value2 = data(3);
+                pressure_value1 = data(5) - app.SHO_Pressure1;
+                pressure_value2 = data(7) - app.SHO_Pressure2;
+                pressure_value3 = data(9) - app.SHO_Pressure3;
+
+                % Optional logging
+                disp(line);  % TODO: Add timestamp here if needed
+
+            catch ME
+                % Assign default error values
+                newFlowIndicator = 'X';
+                flow_value1 = -1;
+                flow_value2 = -1;
+                pressure_value1 = -1;
+                pressure_value2 = -1;
+                pressure_value3 = -1;
+
+                % Display error message
+                warning(ME.identifier, "Serial parsing failed: %s", ME.message);
                 disp(line);
             end
-
         end
 
         function startLogging(app)
@@ -480,8 +478,7 @@ classdef CCTA_exported < matlab.apps.AppBase
 
                 % Read sensor data
                 [~, flow_value1, flow_value2, ...
-                    ~, pressure_value1, ~, pressure_value2, ...
-                    ~, pressure_value3] = app.parseArduinoData(line);
+                    pressure_value1, pressure_value2, pressure_value3] = app.parseArduinoData(line);
 
                 % Append new sensor data
                 app.t = [app.t tNew];
@@ -529,16 +526,10 @@ classdef CCTA_exported < matlab.apps.AppBase
 
                 % Update pressure/flow plots
                 app.updateDataPlots();
-                % fprintf("Plot Update: %.2f Hz (%.2f s) \n", 1/toc(lastplotUpdate), toc(lastplotUpdate));
-                % lastplotUpdate = tic;
 
                 % Update PID if in Auto mode
                 if app.PumpControlMode == "Auto"
                     app.updatePIDOutputs();
-                elseif app.PumpControlMode == "Pulsatile"
-                    flow = interp1(app.pulsatileFlowTimes, app.pulsatileFlowValues, ...
-                        mod(tNew, app.pulsatileFlowPeriod), 'previous');  % interpolate next flow value to use, according to current time
-                    app.setPumpPower(flow/app.PUMP_MAX_FLOW*100);
                 end
 
                 % If duration mode, break when time is up, otherwise update
@@ -578,18 +569,28 @@ classdef CCTA_exported < matlab.apps.AppBase
                 app.PumpControlModeDropDown.Value = "Manual";
                 app.PumpPowerSlider.Enable = "on";
                 app.PumpPowerSpinner.Enable = "on";
+
+                app.setPumpPower(50);  % let Arduino know we're back to manual control
+
             elseif mode == "Auto"  % PID Control
                 app.PumpControlMode = "Auto";
                 app.PumpControlModeDropDown.Value = "Auto";
                 app.PumpPowerSlider.Enable = "off";
                 app.PumpPowerSpinner.Enable = "off";
-            elseif mode == "Pulsatile"  % Mode not fully implemented yet
+
+            elseif mode == "Pulsatile"
                 app.PID_setpoint_id = "None";
                 app.highlightSetPointUI("None");  % clear any setpoint UI from any prior PID control
                 app.PumpControlMode = "Pulsatile";
                 app.PumpControlModeDropDown.Enable = "on";
-                app.PumpPowerSlider.Enable = "off";
-                app.PumpPowerSpinner.Enable = "off";
+
+                app.PulseBPMLabel.Enable = "on";
+                app.PulseBPMSpinner.Enable = "on";
+                app.PulseBPMSlider.Enable = "on";
+
+                app.setPumpPower(app.PULSATILE_DEFAULT_POWER);  % to set default pulsatile flow power
+                app.PulseBPMSliderValueChanged();  % send first pulsatile command
+
             elseif mode == "Calibration"
                 app.PID_setpoint_id = "None";
                 app.highlightSetPointUI("None");  % clear any setpoint UI from any prior PID control
@@ -599,6 +600,15 @@ classdef CCTA_exported < matlab.apps.AppBase
                 app.PumpPowerSpinner.Enable = "off";
             else
                 warning("Invalid control mode selected.");
+            end
+
+            if mode ~= "Pulsatile"
+                % Reset pulsatile flow UI
+                app.PulseBPMLabel.Enable = "off";
+                app.PulseBPMSpinner.Enable = "off";
+                app.PulseBPMSlider.Enable = "off";
+                app.PulseBPMSpinner.Value = app.PULSATILE_DEFAULT_BPM;
+                app.PulseBPMSlider.Value = app.PULSATILE_DEFAULT_BPM;
             end
         end
         
@@ -670,7 +680,7 @@ classdef CCTA_exported < matlab.apps.AppBase
                 app.pumpDutyCycle = app.PUMP_MIN_DUTY_CYCLE;
             end
 
-            app.setPumpPower(app.pumpDutyCycle/app.ARDUINO_ANALOGWRITE_MAX*100);
+            app.setPumpPower(app.pumpDutyCycle, 'dutyCycle');
         end
         
         function updateSerialPortList(app)
@@ -791,7 +801,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             configureTerminator(app.arduinoObj, "LF"); % Assuming newline ('\n') terminates messages
             app.arduinoObj.Timeout = 5; % Timeout for read operations 
 
-            app.WaitForArduinoMessage();
+            app.waitForArduinoMessage();
         end
         
         function [t, line] = getArduinoData(app)
@@ -806,17 +816,17 @@ classdef CCTA_exported < matlab.apps.AppBase
             %   Outputs:
             %       LINE - A string of raw data from the Arduino or simulated data
             
+            t = toc(app.mainLoopTime);
+
             if app.SimulateDataCheckBox.Value
                 % Simulate data in GUI (for testing)
                 line = "NF: N, F1: 1.50 L/min, F2: 2.50 L/min, P1R: 1023, P1: 20 mmHg, P2R: 1023, P2: 50 mmHg, P3R: 1023, P3: 80 mmHg, Pump: 128/255\n";
-                t = toc(app.mainLoopTime);
             else
                 try
                     if app.arduinoObj.NumBytesAvailable > 0
                         flushinput(app.arduinoObj);
                         readline(app.arduinoObj);  % Read until next newline in case flush clears part of a line
                         line = readline(app.arduinoObj); % Read a line of text
-                        t = toc(app.mainLoopTime);
                     else
                         line = [];
                     end
@@ -828,7 +838,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             end
         end
         
-        function WaitForArduinoMessage(app)
+        function waitForArduinoMessage(app)
             %WAITFORARDUINOMESSAGE Waits for the Arduino to send serial data.
             %
             %   WAITFORARDUINOMESSAGE() pauses execution until the Arduino has
@@ -1185,7 +1195,13 @@ classdef CCTA_exported < matlab.apps.AppBase
             y_fill = [ylims(1), ylims(1), ylims(2), ylims(2)];
             set(app.flowFill, 'XData', x_fill, 'YData', y_fill);
 
-            drawnow limitrate;
+            try
+                drawnow limitrate;
+            catch
+                % Drawnow limitrate sometimes crashes after a while, need
+                % to debug why.
+                pause(app.PAUSE_LENGTH);
+            end
         end
         
         function continueCalibration(app)
@@ -1394,55 +1410,70 @@ classdef CCTA_exported < matlab.apps.AppBase
         end
 
         
-        function setPumpPower(app,percentPower)
-            %SETPUMPPOWER Sets the pump power and updates the UI and Arduino.
+        function setPumpPower(app, value, varargin)
+            % SETPUMPPOWER Sets the pump power using percent or duty cycle.
             %
-            %   SETPUMPPOWER(PERCENTPOWER) adjusts the pump power to the specified
-            %   percentage, updates the UI color and values, calculates the duty cycle,
-            %   and sends the appropriate command to the Arduino if connected.
+            %   SETPUMPPOWER(VALUE) sets pump power as a percentage (0–100).
+            %   SETPUMPPOWER(VALUE, 'dutyCycle') interprets VALUE as a raw duty cycle
+            %   between 0 and app.ARDUINO_ANALOGWRITE_MAX, and converts it to percent.
             %
             %   Inputs:
-            %       PERCENTPOWER - Desired pump power as a percentage (0–100)
+            %       VALUE - Either percent power (0–100) or duty cycle (0–max)
+            %       'dutyCycle' (optional) - keyword flag to indicate VALUE is a duty cycle
             %
             %   Outputs:
             %       None
 
+            % Handle optional flag
+            isDutyCycle = false;
+            if ~isempty(varargin)
+                flag = varargin{1};
+                if strcmpi(flag, 'dutyCycle')
+                    isDutyCycle = true;
+                else
+                    uialert(app.UIFigure, ...
+                        sprintf("Unrecognized input flag: '%s'. Only 'dutyCycle' is supported.", string(flag)), ...
+                        "Invalid Input");
+                    return;
+                end
+            end
+
+            % Convert if duty cycle
+            if isDutyCycle
+                percentPower = value / app.ARDUINO_ANALOGWRITE_MAX * 100;
+            else
+                percentPower = value;
+            end
+
+            % Validate percentPower
+            if percentPower < 0 || percentPower > 100
+                uialert(app.UIFigure, ...
+                    sprintf("Invalid pulsatile power was attempted to be set: %.2f. Value must be between 0 and 100.", percentPower), ...
+                    "Invalid Input");
+                return;
+            end
+
             % Update UI
-            if percentPower > 0
+            if percentPower == 0
+                % Show error color when pump is off
+                app.PumpPowerSpinner.BackgroundColor = app.COLOR_ERROR;  
+            else
+                % Show an appropriate shade of warning color to show
+                % current pump power
                 alpha = percentPower/100;
                 app.PumpPowerSpinner.BackgroundColor = (1 - alpha) * app.COLOR_NORMAL + alpha * app.COLOR_WARNING;
-            elseif percentPower == 0
-                app.PumpPowerSpinner.BackgroundColor = app.COLOR_ERROR;  % show error color when pump is off
-            else
-                uialert(app.UIFigure, ...
-                    sprintf("Invalid pump power was attempted to be set: %.2f. Pump has been set to 0 percent power.",percentPower));
-                percentPower = 0;
             end
 
             app.PumpPowerSpinner.Value = percentPower;
             app.PumpPowerSlider.Value = percentPower;
-            app.CurrentPumpAnalogWriteValueEditField.Value = app.pumpDutyCycle;
 
             % Calculate flow duty cycle value
             app.pumpDutyCycle = round(percentPower/100*app.ARDUINO_ANALOGWRITE_MAX);
+            app.CurrentPumpAnalogWriteValueEditField.Value = app.pumpDutyCycle;
 
-            try
-                % Send pump power command to Arduino
-                if ~isempty(app.arduinoObj)
-                    flushoutput(app.arduinoObj);  % in case this was done in the middle of sending another command
-                end
-
-                % Send command to Arduino
-                if app.SimulateDataCheckBox.Value == false && ~app.pumpStopped
-                    command = sprintf("PMP: %d",app.pumpDutyCycle);
-                    writeline(app.arduinoObj,command);
-                    app.WaitForArduinoMessage();
-                end
-            catch err
-                uialert(app.UIFigure, ...
-                    sprintf("Error encountered while sending pump power command to Arduino: %s", err.message), ...
-                    "Serial Communication Error");
-            end
+            % Set command to Arduino
+            command = sprintf("PMP: %d",app.pumpDutyCycle);
+            app.sendArduinoMessage(command); 
         end
         
         function setUpDataPlots(app)
@@ -1493,6 +1524,65 @@ classdef CCTA_exported < matlab.apps.AppBase
             lgdFlow.AutoUpdate = "off";
             
         end
+        
+
+        function setPulsatileFlow(app, bpm, percentPower)
+            % SETPULSATILEFLOW Sends a pulsatile flow command to the Arduino.
+            %
+            %   SETPULSATILEFLOW(BPM, PERCENTPOWER) sends a pulsatile command with the
+            %   given BPM and amplitude (as percent power) to the Arduino.
+            %
+            %   Inputs:
+            %       BPM           - Pulsatile frequency in beats per minute (scalar)
+            %       PERCENTPOWER  - Amplitude of flow oscillation in percent (0–100)
+            %
+            %   Outputs:
+            %       None
+
+            % Validate percentPower
+            if percentPower < 0 || percentPower > 100
+                uialert(app.UIFigure, ...
+                    sprintf("Invalid pulsatile power was attempted to be set: %.2f. Value must be between 0 and 100.", percentPower), ...
+                    "Invalid Input");
+                return;
+            elseif bpm < 0
+                uialert(app.UIFigure, ...
+                    sprintf("Invalid pulsatile bpm was attempted to be set: %.2f. Value must be greater than 0.", bpm), ...
+                    "Invalid Input");
+                return;
+            end
+
+            % Update UI
+            app.PulseBPMSpinner.Value = bpm;
+            app.PulseBPMSlider.Value = bpm;
+
+            % Calculate amplitude as a fraction
+            amplitude = round(percentPower / 100 * app.ARDUINO_ANALOGWRITE_MAX);
+
+            command = sprintf("PULSE: %d, %d", bpm, amplitude);
+            app.sendArduinoMessage(command);
+        end
+
+        
+        function sendArduinoMessage(app, message)
+            try
+                % Send pump power command to Arduino
+                if ~isempty(app.arduinoObj)
+                    flushoutput(app.arduinoObj);  % in case this was done in the middle of sending another command
+                end
+
+                % Send command to Arduino
+                if app.SimulateDataCheckBox.Value == false && ~app.pumpStopped
+                    writeline(app.arduinoObj,message);
+                    app.waitForArduinoMessage();  % Helps prevent crashing
+                end
+            catch err
+                uialert(app.UIFigure, ...
+                    sprintf("Error encountered while sending message to Arduino: %s \n\n Attempted message: %s", err.message, message), ...
+                    "Serial Communication Error");
+            end
+            
+        end
     end
 
 
@@ -1519,10 +1609,9 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.PID_errors = zeros(1, app.PID_ERRORS_LENGTH);
             app.UIFigure.Resize = 'off';
             app.PUMP_MIN_DUTY_CYCLE = app.PUMP_MIN_POWER_PID * app.ARDUINO_ANALOGWRITE_MAX;
-            app.pulsatileFlowValues = app.pulsatileFlowValues * (app.PUMP_MAX_FLOW / max(app.pulsatileFlowValues));  % scale pulsatile flow values to max pump flow rate
             app.PumpPowerSwitchValueChanged();
 
-            % Update UI elements
+            %% Update UI elements
             app.UIFigure.Name = 'Cardiac Catheterization Testing Apparatus (CCTA)';
             disableDefaultInteractivity(app.PressureAxes);
             disableDefaultInteractivity(app.FlowAxes);
@@ -1530,9 +1619,8 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.updateUIPIDCoeffs();
             app.PressureAxes.Visible = "on";  % bug sometimes makes it invisible if this isn't set
             app.FlowAxes.Visible = "on";
-
-            % TODO: implement below
-            app.pulsatileFlowPeriod = app.pulsatileFlowTimes(end);
+            app.PulseBPMSpinner.Value = app.PULSATILE_DEFAULT_BPM;
+            app.PulseBPMSlider.Value = app.PULSATILE_DEFAULT_POWER;
         end
 
         % Button pushed function: ConnectDisconnectButton
@@ -1745,7 +1833,7 @@ classdef CCTA_exported < matlab.apps.AppBase
         % Value changed function: CurrentPumpAnalogWriteValueEditField
         function CurrentPumpAnalogWriteValueEditFieldValueChanged(app, event)
             value = app.CurrentPumpAnalogWriteValueEditField.Value;
-            app.setPumpPower(value/app.ARDUINO_ANALOGWRITE_MAX);
+            app.setPumpPower(value,'dutyCycle');
             app.setPumpControlMode("Manual");
         end
 
@@ -1777,7 +1865,7 @@ classdef CCTA_exported < matlab.apps.AppBase
         % Value changed function: Flow1_EditField_Target
         function Flow1_EditField_TargetValueChanged(app, event)
             app.PID_setpoint = app.Flow1_EditField_Target.Value;
-            app.setPumpControlMode("PID");
+            app.setPumpControlMode("Auto");
             app.highlightSetPointUI("Flow1");
             app.PID_setpoint_id = "Flow1";
         end
@@ -1785,7 +1873,7 @@ classdef CCTA_exported < matlab.apps.AppBase
         % Value changed function: Flow2_EditField_Target
         function Flow2_EditField_TargetValueChanged(app, event)
             app.PID_setpoint = app.Flow2_EditField_Target.Value;
-            app.setPumpControlMode("PID");
+            app.setPumpControlMode("Auto");
             app.highlightSetPointUI("Flow2");
             app.PID_setpoint_id = "Flow2";
         end
@@ -1793,7 +1881,7 @@ classdef CCTA_exported < matlab.apps.AppBase
         % Value changed function: Pressure1_EditField_Target
         function Pressure1_EditField_TargetValueChanged(app, event)
             app.PID_setpoint = app.Pressure1_EditField_Target.Value;
-            app.setPumpControlMode("PID");
+            app.setPumpControlMode("Auto");
             app.highlightSetPointUI("Pressure1");
             app.PID_setpoint_id = "Pressure1";
         end
@@ -1801,7 +1889,7 @@ classdef CCTA_exported < matlab.apps.AppBase
         % Value changed function: Pressure2_EditField_Target
         function Pressure2_EditField_TargetValueChanged(app, event)
             app.PID_setpoint = app.Pressure2_EditField_Target.Value;
-            app.setPumpControlMode("PID");
+            app.setPumpControlMode("Auto");
             app.highlightSetPointUI("Pressure2");
             app.PID_setpoint_id = "Pressure2";
         end
@@ -1809,7 +1897,7 @@ classdef CCTA_exported < matlab.apps.AppBase
         % Value changed function: Pressure3_EditField_Target
         function Pressure3_EditField_TargetValueChanged(app, event)
             app.PID_setpoint = app.Pressure3_EditField_Target.Value;
-            app.setPumpControlMode("PID");
+            app.setPumpControlMode("Auto");
             app.highlightSetPointUI("Pressure3");
             app.PID_setpoint_id = "Pressure3";
         end
@@ -1848,13 +1936,6 @@ classdef CCTA_exported < matlab.apps.AppBase
         function KdPressureEditFieldValueChanged(app, event)
             app.Kd_pressure = app.KdPressureEditField.Value;
             app.dimEditFieldTemporarily(app.KdPressureEditField); 
-        end
-
-        % Value changed function: PumpPowerSlider
-        function PumpPowerSliderValueChanged(app, event)
-            app.setPumpControlMode("Manual");
-            pumpPowerPercent = app.PumpPowerSlider.Value;
-            app.setPumpPower(pumpPowerPercent);
         end
 
         % Value changed function: SimulateDataCheckBox
@@ -2032,11 +2113,28 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.dimEditFieldTemporarily(app.RollingaveragedurationsEditField);
         end
 
+        % Value changed function: PumpPowerSlider
+        function PumpPowerSliderValueChanged(app, event)
+            percentPower = app.PumpPowerSlider.Value;
+            app.PumpPowerSpinner.Value = percentPower;
+            controlMode = app.PumpControlModeDropDown.Value;
+            app.dimEditFieldTemporarily(app.PumpPowerSpinner);
+            
+            if controlMode == "Auto"
+                app.setPumpControlMode("Manual");
+                app.setPumpPower(percentPower);
+            elseif controlMode == "Pulsatile"
+                bpm = app.PulseBPMSlider.Value;  % TODO: use a separate variable instead of pulling values from the UI
+                app.setPulsatileFlow(bpm,percentPower);
+            end
+
+        end
+
         % Value changed function: PumpPowerSpinner
         function PumpPowerSpinnerValueChanged(app, event)
             pumpPowerPercent = app.PumpPowerSpinner.Value;
-            app.setPumpPower(pumpPowerPercent);
-            app.dimEditFieldTemporarily(app.PumpPowerSpinner);
+            app.PumpPowerSlider.Value = pumpPowerPercent;  % set slider to appropriate value
+            app.PumpPowerSliderValueChanged();  % pretend slider was just changed instead
         end
 
         % Value changed function: PumpPowerSwitch
@@ -2077,6 +2175,20 @@ classdef CCTA_exported < matlab.apps.AppBase
             else
                 app.setPumpControlMode(value);
             end
+        end
+
+        % Value changed function: PulseBPMSpinner
+        function PulseBPMSpinnerValueChanged(app, event)
+            bpm = app.PulseBPMSpinner.Value;
+            percentPower = app.PumpPowerSlider.Value;
+            app.setPulsatileFlow(bpm, percentPower);
+        end
+
+        % Value changed function: PulseBPMSlider
+        function PulseBPMSliderValueChanged(app, event)
+            bpm = round(app.PulseBPMSlider.Value);
+            percentPower = app.PumpPowerSlider.Value;
+            app.setPulsatileFlow(bpm, percentPower);
         end
     end
 
@@ -2525,51 +2637,51 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.PumpControlPanel.Enable = 'off';
             app.PumpControlPanel.BackgroundColor = [0.902 0.902 0.902];
             app.PumpControlPanel.FontWeight = 'bold';
-            app.PumpControlPanel.Position = [15 150 302 149];
+            app.PumpControlPanel.Position = [15 104 302 195];
 
             % Create PumpPowerSlider
             app.PumpPowerSlider = uislider(app.PumpControlPanel);
             app.PumpPowerSlider.ValueChangedFcn = createCallbackFcn(app, @PumpPowerSliderValueChanged, true);
             app.PumpPowerSlider.Enable = 'off';
             app.PumpPowerSlider.Tooltip = {'Sends a PWM signal to the pump from 0 to 100% power. 100% power represents the full voltage of your power supply.'};
-            app.PumpPowerSlider.Position = [129 45 150 3];
+            app.PumpPowerSlider.Position = [129 91 150 3];
 
             % Create PumpPowerSpinner
             app.PumpPowerSpinner = uispinner(app.PumpControlPanel);
             app.PumpPowerSpinner.Limits = [0 100];
             app.PumpPowerSpinner.RoundFractionalValues = 'on';
             app.PumpPowerSpinner.ValueChangedFcn = createCallbackFcn(app, @PumpPowerSpinnerValueChanged, true);
-            app.PumpPowerSpinner.Position = [18 19 92 17];
+            app.PumpPowerSpinner.Position = [18 65 92 17];
 
             % Create PumpPowerSwitchLabel
             app.PumpPowerSwitchLabel = uilabel(app.PumpControlPanel);
             app.PumpPowerSwitchLabel.HorizontalAlignment = 'right';
             app.PumpPowerSwitchLabel.FontWeight = 'bold';
-            app.PumpPowerSwitchLabel.Position = [31 112 78 22];
+            app.PumpPowerSwitchLabel.Position = [31 158 78 22];
             app.PumpPowerSwitchLabel.Text = 'Pump Power';
 
             % Create PumpPowerSwitch
             app.PumpPowerSwitch = uiswitch(app.PumpControlPanel, 'slider');
             app.PumpPowerSwitch.ValueChangedFcn = createCallbackFcn(app, @PumpPowerSwitchValueChanged, true);
             app.PumpPowerSwitch.FontWeight = 'bold';
-            app.PumpPowerSwitch.Position = [184 113 45 20];
+            app.PumpPowerSwitch.Position = [184 159 45 20];
 
             % Create PumpPowerPercentLabel
             app.PumpPowerPercentLabel = uilabel(app.PumpControlPanel);
             app.PumpPowerPercentLabel.FontWeight = 'bold';
-            app.PumpPowerPercentLabel.Position = [15 38 100 22];
+            app.PumpPowerPercentLabel.Position = [15 84 100 22];
             app.PumpPowerPercentLabel.Text = 'Pump Power (%)';
 
             % Create PumpControlModeDropdownLabel
             app.PumpControlModeDropdownLabel = uilabel(app.PumpControlPanel);
             app.PumpControlModeDropdownLabel.HorizontalAlignment = 'right';
             app.PumpControlModeDropdownLabel.FontWeight = 'bold';
-            app.PumpControlModeDropdownLabel.Position = [26 72 82 22];
+            app.PumpControlModeDropdownLabel.Position = [26 118 82 22];
             app.PumpControlModeDropdownLabel.Text = 'Control Mode';
 
             % Create PumpPowerLamp
             app.PumpPowerLamp = uilamp(app.PumpControlPanel);
-            app.PumpPowerLamp.Position = [271 114 20 20];
+            app.PumpPowerLamp.Position = [271 160 20 20];
             app.PumpPowerLamp.Color = [0.502 0.502 0.502];
 
             % Create PumpControlModeDropDown
@@ -2577,8 +2689,34 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.PumpControlModeDropDown.Items = {'Manual', 'Auto', 'Pulsatile'};
             app.PumpControlModeDropDown.ValueChangedFcn = createCallbackFcn(app, @PumpControlModeDropDownValueChanged, true);
             app.PumpControlModeDropDown.Tooltip = {'Choose how to control the pump:'; '- Manual: Set pump power yourself'; '- Auto: Use PID control to achieve targets'; '- Pulsatile: Simulate pulsatile flow'};
-            app.PumpControlModeDropDown.Position = [146 72 117 22];
+            app.PumpControlModeDropDown.Position = [146 118 117 22];
             app.PumpControlModeDropDown.Value = 'Manual';
+
+            % Create PulseBPMSlider
+            app.PulseBPMSlider = uislider(app.PumpControlPanel);
+            app.PulseBPMSlider.Limits = [1 200];
+            app.PulseBPMSlider.MajorTicks = [1 50 100 150 200];
+            app.PulseBPMSlider.ValueChangedFcn = createCallbackFcn(app, @PulseBPMSliderValueChanged, true);
+            app.PulseBPMSlider.Enable = 'off';
+            app.PulseBPMSlider.Tooltip = {'Sends a PWM signal to the pump from 0 to 100% power. 100% power represents the full voltage of your power supply.'};
+            app.PulseBPMSlider.Position = [128 40 150 3];
+            app.PulseBPMSlider.Value = 60;
+
+            % Create PulseBPMSpinner
+            app.PulseBPMSpinner = uispinner(app.PumpControlPanel);
+            app.PulseBPMSpinner.Limits = [1 200];
+            app.PulseBPMSpinner.RoundFractionalValues = 'on';
+            app.PulseBPMSpinner.ValueChangedFcn = createCallbackFcn(app, @PulseBPMSpinnerValueChanged, true);
+            app.PulseBPMSpinner.Enable = 'off';
+            app.PulseBPMSpinner.Position = [17 14 92 17];
+            app.PulseBPMSpinner.Value = 60;
+
+            % Create PulseBPMLabel
+            app.PulseBPMLabel = uilabel(app.PumpControlPanel);
+            app.PulseBPMLabel.HorizontalAlignment = 'center';
+            app.PulseBPMLabel.FontWeight = 'bold';
+            app.PulseBPMLabel.Position = [14 33 96 22];
+            app.PulseBPMLabel.Text = 'Pulse BPM';
 
             % Create FlowGraphPanel
             app.FlowGraphPanel = uipanel(app.MainTab);
