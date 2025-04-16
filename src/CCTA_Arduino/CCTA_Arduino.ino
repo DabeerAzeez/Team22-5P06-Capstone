@@ -14,7 +14,11 @@
 
 // TODO: Investigate whether newFlowIndicator is working as expected
 
-// Pin definitions
+// ====================================================
+// HARDWARE CONFIGURATION
+// ====================================================
+
+// --- Pin Definitions ---
 const unsigned char FLOW_SENSOR_PIN1 = 2;       // Flow sensor 1 input pin
 const unsigned char FLOW_SENSOR_PIN2 = 3;       // Flow sensor 2 input pin
 const unsigned char PUMP_PWM_PIN = 9;           // H-bridge enable/PWM pin
@@ -22,34 +26,72 @@ const unsigned char PRESSURE_SENSOR_PIN1 = A1;  // Pressure sensor 1 input pin
 const unsigned char PRESSURE_SENSOR_PIN2 = A2;  // Pressure sensor 2 input pin
 const unsigned char PRESSURE_SENSOR_PIN3 = A3;  // Pressure sensor 3 input pin
 
-// Other constants
-const unsigned long PRESSURE_SENSOR_READ_INTERVAL = 50.;  // Interval for pressure readings (ms)
-const unsigned long FLOW_SENSOR_READ_INTERVAL = 2000.;    // Interval for flow readings (ms); assumed to be many times larger than PRESSURE_SENSOR_READ_INTERVAL
-const unsigned long EXPECTED_MATLAB_MESSAGE_LENGTH = 50;  // Length of message (# chars) expected from MATLAB for pump control
-const unsigned long MAX_DUTY_CYCLE = 255;  // 10-bit ADC on Arduino Uno
+// --- System Constants ---
+const unsigned long PRESSURE_SENSOR_READ_INTERVAL = 50;   // Interval for pressure readings (ms)
+const unsigned long FLOW_SENSOR_READ_INTERVAL = 2000;     // Interval for flow readings (ms)
+const unsigned long EXPECTED_MATLAB_MESSAGE_LENGTH = 50;  // Length of expected message from MATLAB
+const unsigned long MAX_DUTY_CYCLE = 255;                 // 8-bit PWM resolution
+const bool SIMULATE_VALUES = false;                       // Toggle value simulation
+const bool SIMULATE_OSCILLATIONS = true;                  // Toggle oscillating simulated values
 
-const bool SIMULATE_VALUES = false;       // whether simulated values should be sent over serial (for testing GUI without physical setup)
-const bool SIMULATE_OSCILLATIONS = true;  // whether simulated values (if enabled) should oscillate sinusoidally over time
 
-// Variables
-volatile int flow1_pulses = 0;         // Flow sensor 1 pulse count
-volatile int flow2_pulses = 0;         // Flow sensor 2 pulse count
-unsigned long currentTime;             // placeholder for current time (ms)
-unsigned long flowSensorTime = 0;      // time of last flow sensor measurement (ms)
-unsigned long pressureSensorTime = 0;  // time of last pressure sensor measurement (ms)
+// ====================================================
+// SYSTEM STATE VARIABLES
+// ====================================================
 
-float flowRate1 = 0, flowRate2 = 0;                                       // flow rates (L/min)
-int pressureValueRaw1 = 0, pressureValueRaw2 = 0, pressureValueRaw3 = 0;  // raw pressure ADC readings
-float pressureValue1 = 0, pressureValue2 = 0, pressureValue3 = 0;         // pressure values (mmHg)
-char newFlowIndicator = 'N';                                              // Indicates whether a new flow reading is available (else sends old one while waiting for next)
+// --- Sensor Readings ---
+volatile int flow1_pulses = 0;
+volatile int flow2_pulses = 0;
+float flowRate1 = 0, flowRate2 = 0;
 
-int pumpDutyCycle = 0;        // PWM duty cycle for pump (0 on startup for safety)
-String inputString = "";      // a String to hold incoming pump commands from GUI
-bool stringComplete = false;  // whether the string is complete
+int pressureValueRaw1 = 0, pressureValueRaw2 = 0, pressureValueRaw3 = 0;
+float pressureValue1 = 0, pressureValue2 = 0, pressureValue3 = 0;
+char newFlowIndicator = 'N';  // Whether new flow data is available
 
-int pulsatileBPM = 60;           // beats per minute for pulsatile flow
-int pulsatileAmplitude = 0.8;    // max duty cycle for pulses (0 to 255)
-bool pulsatileFlowEnabled = false;
+// --- Timing Variables ---
+unsigned long currentTime = 0;
+unsigned long flowSensorTime = 0;
+unsigned long pressureSensorTime = 0;
+
+// --- Pump & Serial Control ---
+int pumpDutyCycle = 0;
+String inputString = "";
+bool stringComplete = false;
+String pumpControlMode = "Manual";  // Default mode
+const int PWM_MIN = 0;
+const int PWM_MAX = 255;
+
+// --- Pulsatile Mode Settings ---
+int pulsatileBPM = 60;
+int pulsatileAmplitude = 0.8 * MAX_DUTY_CYCLE;
+
+
+// ====================================================
+// PID CONTROL CONFIGURATION
+// ====================================================
+
+// --- PID Parameters & State ---
+String pidSetpointId = "None";
+float pidSetpoint = 0;
+float Kp = 0.0, Ki = 0.0, Kd = 0.0;
+
+char pidSetpointIdBuffer[20];              // temporary buffer for sscanf (e.g. "Pressure1")
+long pidSetpointInt, KpInt, KiInt, KdInt;  // scaled integer values received
+
+float pidError = 0.0;
+float pidIntegral = 0.0;
+float pidPrevError = 0.0;
+float pidDerivative = 0.0;
+
+// --- Rolling Error History ---
+const int PID_HISTORY_LEN = 40;
+float rollingErrors[PID_HISTORY_LEN] = { 0 };
+int rollingIndex = 0;
+
+// --- PID Timing ---
+unsigned long lastPIDTime = 0;
+const int PID_INTERVAL_MS = 50;
+
 
 /**
  * Interrupt service routines for the flow sensors.
@@ -102,7 +144,13 @@ void loop() {
     readSensorValues();
   }
 
-  if (pulsatileFlowEnabled) {
+  if (pumpControlMode == "Auto") {
+    // Update PID Control if it's been long enough
+    if (millis() - lastPIDTime >= PID_INTERVAL_MS) {
+      lastPIDTime = millis();
+      runPIDControl();
+    }
+  } else if (pumpControlMode == "Pulsatile") {
     setPulsatileFlow();
   }
 
@@ -194,9 +242,42 @@ void processSerial(String inputString) {
     Serial.print(pumpDutyCycle);
     Serial.println("/255");
 
-    pulsatileFlowEnabled = false;
+    pumpControlMode = "Manual";
 
     analogWrite(PUMP_PWM_PIN, pumpDutyCycle);
+  } else if (sscanf(inputString.c_str(), "PID: %[^,], %ld, %ld, %ld, %ld",
+                    pidSetpointIdBuffer, &pidSetpointInt, &KpInt, &KiInt, &KdInt)
+             == 5) {
+
+    // Convert char buffer to String
+    pidSetpointId = String(pidSetpointIdBuffer);
+
+    // Convert ints back to float (assumes scaling by 10000)
+    pidSetpoint = pidSetpointInt / 10000.0;
+    Kp = KpInt / 10000.0;
+    Ki = KiInt / 10000.0;
+    Kd = KdInt / 10000.0;
+
+    Serial.print("RECEIVED PID SETUP -> Target: ");
+    Serial.print(pidSetpointId);
+    Serial.print(" | Setpoint: ");
+    Serial.print(pidSetpoint);
+    Serial.print(" | Kp: ");
+    Serial.print(Kp);
+    Serial.print(" | Ki: ");
+    Serial.print(Ki);
+    Serial.print(" | Kd: ");
+    Serial.println(Kd);
+
+    // Reset PID error calculations
+    pidIntegral = 0.0;
+    pidPrevError = 0.0;
+    rollingErrors[PID_HISTORY_LEN] = { 0 };
+    rollingIndex = 0;
+
+    // Set pump control mode to auto so main loop can handle it from there
+    pumpControlMode = "Auto";
+
   } else if (sscanf(inputString.c_str(), "PULSE: %d, %d", &pulsatileBPM, &pulsatileAmplitude) == 2) {
     Serial.print("RECEIVED pulsatile flow settings (BPM: ");
     Serial.print(pulsatileBPM);
@@ -204,7 +285,7 @@ void processSerial(String inputString) {
     Serial.print(pulsatileAmplitude);
     Serial.println(")");
 
-    pulsatileFlowEnabled = true;
+    pumpControlMode = "Pulsatile";
   } else {
     Serial.print("ERROR: Unrecognized message: ");
     Serial.println(inputString);
@@ -311,6 +392,70 @@ float interpolatePressure(float adc_value, int sensorNum) {
   return -999;  // Error value
 }
 
+/**
+ * runPIDControl
+ * 
+ * Executes one iteration of the PID control algorithm. It reads the current
+ * value from the specified sensor, computes the error, updates integral and
+ * derivative terms, calculates the PID output, and applies it to the pump
+ * using analogWrite. The output is constrained within the PWM range.
+ */
+void runPIDControl() {
+  // Prevent integral from accumulating infinitely by removing oldest error term's contribution
+  int oldestIndex = (rollingIndex + 1) % PID_HISTORY_LEN;
+  float oldestError = rollingErrors[oldestIndex];
+  pidIntegral -= oldestError * (PID_INTERVAL_MS / 1000.0);
+
+  // Get new error value and calculate PID output
+  float currentValue = getSensorValue(pidSetpointId);
+  pidError = pidSetpoint - currentValue;
+  rollingErrors[rollingIndex] = pidError;
+  rollingIndex = (rollingIndex + 1) % PID_HISTORY_LEN;
+
+  pidIntegral += pidError * (PID_INTERVAL_MS / 1000.0);
+  pidDerivative = (pidError - pidPrevError) / (PID_INTERVAL_MS / 1000.0);
+  pidPrevError = pidError;
+
+  float pidOutput = Kp * pidError + Ki * pidIntegral + Kd * pidDerivative;
+  pumpDutyCycle = constrain(pumpDutyCycle + (int)pidOutput, PWM_MIN, PWM_MAX);
+  analogWrite(PUMP_PWM_PIN, pumpDutyCycle);
+
+  // Serial print commands (for debugging)
+  // Serial.print(">>> PID CONTROL ");
+  // Serial.print("| Setpoint: ");
+  // Serial.print(pidSetpoint);
+  // Serial.print(" | Current: ");
+  // Serial.print(currentValue);
+  // Serial.print(" | Error: ");
+  // Serial.print(pidError);
+  // Serial.print(" | Integral: ");
+  // Serial.print(pidIntegral);
+  // Serial.print(" | Derivative: ");
+  // Serial.print(pidDerivative);
+  // Serial.print(" | Output: ");
+  // Serial.print(pidOutput);
+  // Serial.println(" <<<");
+}
+
+/**
+ * getSensorValue
+ *
+ * Returns the current reading of a sensor specified by its ID string.
+ * The ID must match one of the predefined sensor names (e.g., "Pressure1").
+ * If the ID does not match, 0 is returned by default.
+ *
+ * @param id The sensor name as a String
+ * @return The latest value of the requested sensor
+ */
+float getSensorValue(String id) {
+  if (id == "Pressure1") return pressureValue1;
+  else if (id == "Pressure2") return pressureValue2;
+  else if (id == "Pressure3") return pressureValue3;
+  else if (id == "Flow1") return flowRate1;
+  else if (id == "Flow2") return flowRate2;
+  return 0;
+}
+
 /*
 * Enables pulsatile flow (i.e. sinusoidal oscillations in pump power) according to system BPM and amplitude for pulsatile flow
 */
@@ -336,7 +481,6 @@ void setPulsatileFlow() {
  * "NF: N, F1: 0.00, F2: 0.00, P1R: 783, P1: 86.65, P2R: 9, P2: -1.28, P3R: 449, P3: 57.24 | PMP: 200 | PULSE: N, BPM: 30, AMP: 200"
  */
 void sendSystemData() {
-
   // Flow data
   Serial.print("NF: ");
   Serial.print(newFlowIndicator);
@@ -363,14 +507,28 @@ void sendSystemData() {
   Serial.print(", P3: ");
   Serial.print(pressureValue3);
 
-  // Pump duty cycle
+  // Control mode
+  Serial.print(" | MODE: ");
+  Serial.print(pumpControlMode);
+
+  // Manual pump power
   Serial.print(" | PMP: ");
   Serial.print(pumpDutyCycle);
-  
+
+  // PID settings
+  Serial.print(" | PID_ID: ");
+  Serial.print(pidSetpointId);
+  Serial.print(", SP: ");
+  Serial.print(pidSetpoint);
+  Serial.print(", Kp: ");
+  Serial.print(Kp);
+  Serial.print(", Ki: ");
+  Serial.print(Ki);
+  Serial.print(", Kd: ");
+  Serial.print(Kd);
+
   // Pulsatile flow parameters
-  Serial.print(" | PULSE: ");
-  Serial.print(pulsatileFlowEnabled ? "Y" : "N");
-  Serial.print(", BPM: ");
+  Serial.print(" | BPM: ");
   Serial.print(pulsatileBPM);
   Serial.print(", AMP: ");
   Serial.println(pulsatileAmplitude);
