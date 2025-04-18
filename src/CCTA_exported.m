@@ -853,20 +853,22 @@ classdef CCTA_exported < matlab.apps.AppBase
                 % Simulate data in GUI (for testing)
                 line = "NF: N, F1: 1.50 L/min, F2: 2.50 L/min, P1R: 1023, P1: 20 mmHg, P2R: 1023, P2: 50 mmHg, P3R: 1023, P3: 80 mmHg, Pump: 128/255\n";
             else
-                try
-                    success = app.waitForArduinoMessage();
-                    if success
-                        flushinput(app.arduinoObj);
-                        readline(app.arduinoObj);  % Read until next newline in case flush clears part of a line
-                        line = readline(app.arduinoObj); % Read a line of text
-                    else
-                        line = [];
-                        success = false;
+                if app.isConnected
+                    try
+                        success = app.waitForArduinoMessage();
+                        if success
+                            flushinput(app.arduinoObj);
+                            readline(app.arduinoObj);  % Read until next newline in case flush clears part of a line
+                            line = readline(app.arduinoObj); % Read a line of text
+                        else
+                            line = [];
+                            success = false;
+                        end
+                    catch err
+                        uialert(app.UIFigure, ...
+                            sprintf("Serial communication error encountered while retrieving Arduino Data: %s", err.message), ...
+                            "Serial Communication Error")
                     end
-                catch err
-                    uialert(app.UIFigure, ...
-                        sprintf("Serial communication error encountered while retrieving Arduino Data: %s", err.message), ...
-                        "Serial Communication Error")
                 end
             end
         end
@@ -1621,23 +1623,24 @@ classdef CCTA_exported < matlab.apps.AppBase
 
         
         function sendArduinoMessage(app, message)
-            try
-                % Send pump power command to Arduino
-                if ~isempty(app.arduinoObj)
-                    flushoutput(app.arduinoObj);  % in case this was done in the middle of sending another command
-                end
+            if app.isConnected
+                try
+                    % Send pump power command to Arduino
+                    if ~isempty(app.arduinoObj)
+                        flushoutput(app.arduinoObj);  % in case this was done in the middle of sending another command
+                    end
 
-                % Send command to Arduino
-                if app.SimulateDataCheckBox.Value == false && ~app.pumpStopped
-                    writeline(app.arduinoObj,message);
-                    app.waitForArduinoMessage();  % Helps prevent crashing
+                    % Send command to Arduino
+                    if app.SimulateDataCheckBox.Value == false && ~app.pumpStopped
+                        writeline(app.arduinoObj,message);
+                        app.waitForArduinoMessage();  % Helps prevent crashing
+                    end
+                catch err
+                    uialert(app.UIFigure, ...
+                        sprintf("Error encountered while sending message to Arduino: %s \n\n Attempted message: %s", err.message, message), ...
+                        "Serial Communication Error");
                 end
-            catch err
-                uialert(app.UIFigure, ...
-                    sprintf("Error encountered while sending message to Arduino: %s \n\n Attempted message: %s", err.message, message), ...
-                    "Serial Communication Error");
             end
-            
         end
         
         function sendPIDConfigToArduino(app)
