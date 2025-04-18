@@ -94,8 +94,6 @@ classdef CCTA_exported < matlab.apps.AppBase
         Pressure2_EditField_Target     matlab.ui.control.NumericEditField
         Pressure1_EditField_Target     matlab.ui.control.NumericEditField
         SettingsTab                    matlab.ui.container.Tab
-        ConsoleLabel                   matlab.ui.control.Label
-        ConsoleTextArea                matlab.ui.control.TextArea
         OtherSettingsPanel             matlab.ui.container.Panel
         RollingaveragedurationsEditField  matlab.ui.control.NumericEditField
         RollingaveragedurationsEditFieldLabel  matlab.ui.control.Label
@@ -124,6 +122,8 @@ classdef CCTA_exported < matlab.apps.AppBase
         PressureControlLabel           matlab.ui.control.Label
         HelpTab                        matlab.ui.container.Tab
         HTML                           matlab.ui.control.HTML
+        ConsoleTab                     matlab.ui.container.Tab
+        ConsoleTextArea                matlab.ui.control.TextArea
     end
 
     % TODO: Add "refresh ports" button
@@ -851,7 +851,8 @@ classdef CCTA_exported < matlab.apps.AppBase
 
             if app.SimulateDataCheckBox.Value
                 % Simulate data in GUI (for testing)
-                line = "NF: N, F1: 1.50 L/min, F2: 2.50 L/min, P1R: 1023, P1: 20 mmHg, P2R: 1023, P2: 50 mmHg, P3R: 1023, P3: 80 mmHg, Pump: 128/255\n";
+                line = "NF: N, F1: 1.50, F2: 2.50, P1R: 1023, P1: 80.00, P2R: 740, P2: 50.00, P3R: 350, P3: 20.00 | MODE: Manual | PMP: 128 | PID_ID: Pressure1 SP: 60.00, Kp: 1.00, Ki: 0.10, Kd: 0.01 | BPM: 75, AMP: 80";
+                success = true;
             else
                 if app.isConnected
                     try
@@ -1774,16 +1775,9 @@ classdef CCTA_exported < matlab.apps.AppBase
                 'Message', 'Please wait...', ...
                 'Indeterminate', 'on');
 
-            % Get current timestamp
+            % Create a timestamped results folder inside the data folder
             timestamp = char(datetime('now', 'Format', 'yyyy-MM-dd-HH-mm-ss'));
-
-            % Create "Data" subfolder if it doesn't exist
-            dataFolder = fullfile(app.appDir, 'Data');
-            if ~exist(dataFolder, 'dir')
-                mkdir(dataFolder);
-            end
-
-            % Create the timestamped results folder inside "Data"
+            dataFolder = fullfile(app.appDir, '..', 'data');
             folderName = fullfile(dataFolder, ['CCTA-', timestamp]);
             if ~exist(folderName, 'dir')
                 mkdir(folderName);
@@ -3160,18 +3154,6 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.RollingaveragedurationsEditField.Position = [257 33 100 22];
             app.RollingaveragedurationsEditField.Value = 10;
 
-            % Create ConsoleTextArea
-            app.ConsoleTextArea = uitextarea(app.SettingsTab);
-            app.ConsoleTextArea.WordWrap = 'off';
-            app.ConsoleTextArea.FontName = 'Consolas';
-            app.ConsoleTextArea.Position = [18 65 1206 143];
-
-            % Create ConsoleLabel
-            app.ConsoleLabel = uilabel(app.SettingsTab);
-            app.ConsoleLabel.FontWeight = 'bold';
-            app.ConsoleLabel.Position = [18 213 52 22];
-            app.ConsoleLabel.Text = 'Console';
-
             % Create HelpTab
             app.HelpTab = uitab(app.MainTabGroup);
             app.HelpTab.Title = 'Help';
@@ -3180,6 +3162,17 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.HTML = uihtml(app.HelpTab);
             app.HTML.HTMLSource = './assets/help.html';
             app.HTML.Position = [16 73 1201 456];
+
+            % Create ConsoleTab
+            app.ConsoleTab = uitab(app.MainTabGroup);
+            app.ConsoleTab.Title = 'Console';
+
+            % Create ConsoleTextArea
+            app.ConsoleTextArea = uitextarea(app.ConsoleTab);
+            app.ConsoleTextArea.WordWrap = 'off';
+            app.ConsoleTextArea.FontName = 'Consolas';
+            app.ConsoleTextArea.Tooltip = {'Console showing important messages from the Arduino as well as other errors and warnings.'};
+            app.ConsoleTextArea.Position = [16 16 1206 514];
 
             % Show the figure after all components are created
             app.UIFigure.Visible = 'on';
