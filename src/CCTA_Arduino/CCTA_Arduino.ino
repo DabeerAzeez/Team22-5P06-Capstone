@@ -90,7 +90,7 @@ int rollingIndex = 0;
 
 // --- PID Timing ---
 unsigned long lastPIDTime = 0;
-const int PID_INTERVAL_MS = 50;
+long pidIntervalMS = PRESSURE_SENSOR_READ_INTERVAL;
 
 
 /**
@@ -146,7 +146,7 @@ void loop() {
 
   if (pumpControlMode == "Auto") {
     // Update PID Control if it's been long enough
-    if (millis() - lastPIDTime >= PID_INTERVAL_MS) {
+    if (millis() - lastPIDTime >= pidIntervalMS) {
       lastPIDTime = millis();
       runPIDControl();
     }
@@ -251,6 +251,17 @@ void processSerial(String inputString) {
 
     // Convert char buffer to String
     pidSetpointId = String(pidSetpointIdBuffer);
+
+    // Check the setpoint identifier and act accordingly
+    if (pidSetpointId.indexOf("Flow") >= 0) {
+      pidIntervalMS = FLOW_SENSOR_READ_INTERVAL;
+    } else if (pidSetpointId.indexOf("Pressure") >= 0) {
+      pidIntervalMS = PRESSURE_SENSOR_READ_INTERVAL;
+    } else {
+      Serial.println("Error: Unrecognized setpoint ID. Reverting to MANUAL mode.");
+      pumpControlMode = "Manual";
+      return;
+    }
 
     // Convert ints back to float (assumes scaling by 10000)
     pidSetpoint = pidSetpointInt / 10000.0;
@@ -404,7 +415,7 @@ void runPIDControl() {
   // Prevent integral from accumulating infinitely by removing oldest error term's contribution
   int oldestIndex = (rollingIndex + 1) % PID_HISTORY_LEN;
   float oldestError = rollingErrors[oldestIndex];
-  pidIntegral -= oldestError * (PID_INTERVAL_MS / 1000.0);
+  pidIntegral -= oldestError * (pidIntervalMS / 1000.0);
 
   // Get new error value and calculate PID output
   float currentValue = getSensorValue(pidSetpointId);
@@ -412,8 +423,8 @@ void runPIDControl() {
   rollingErrors[rollingIndex] = pidError;
   rollingIndex = (rollingIndex + 1) % PID_HISTORY_LEN;
 
-  pidIntegral += pidError * (PID_INTERVAL_MS / 1000.0);
-  pidDerivative = (pidError - pidPrevError) / (PID_INTERVAL_MS / 1000.0);
+  pidIntegral += pidError * (pidIntervalMS / 1000.0);
+  pidDerivative = (pidError - pidPrevError) / (pidIntervalMS / 1000.0);
   pidPrevError = pidError;
 
   float pidOutput = Kp * pidError + Ki * pidIntegral + Kd * pidDerivative;
