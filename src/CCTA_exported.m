@@ -458,6 +458,8 @@ classdef CCTA_exported < matlab.apps.AppBase
 
             app.flow_vals1 = [];  
             app.flow_vals2 = [];
+            app.flow_markers1 = [];
+            app.flow_markers2 = [];
 
             app.pressure_vals1 = [];
             app.pressure_vals2 = [];
@@ -1615,6 +1617,9 @@ classdef CCTA_exported < matlab.apps.AppBase
             % Initialize flow plot lines and fill with NaNs
             app.flow1Line = plot(app.FlowAxes, nan, nan, 'Color', app.COLOR_FLOW*0.7, 'DisplayName', app.flow1_label, 'LineWidth', lineWidth);
             app.flow2Line = plot(app.FlowAxes, nan, nan, 'Color', [0 0 0], 'DisplayName', app.flow2_label, 'LineWidth', lineWidth);
+            if ~isempty(app.flow1MarkerLine) && isgraphics(app.flow1MarkerLine)
+                delete(app.flow1MarkerLine);  % Forces delete of Flow1MarkerLine because cla() doesn't work when HandleVisibility is 'off'
+            end
             app.flow1MarkerLine = plot(app.FlowAxes, nan, nan, 'o', 'MarkerSize', 5, 'MarkerEdgeColor', app.COLOR_FLOW*0.7, 'LineStyle', 'none', 'HandleVisibility', 'off');  % marker lines to highlight new flow values
             app.flow2MarkerLine = plot(app.FlowAxes, nan, nan, 'o', 'MarkerSize', 5, 'MarkerEdgeColor', [0 0 0], 'LineStyle', 'none', 'DisplayName', 'New Values');  % Only add one marker line (black one) to legend for clarity
 
