@@ -171,6 +171,8 @@ classdef CCTA_exported < matlab.apps.AppBase
         pressureFill
         flow1Line
         flow2Line
+        flow1MarkerLine
+        flow2MarkerLine
         flowTargetLine
         flowFill
 
@@ -196,6 +198,8 @@ classdef CCTA_exported < matlab.apps.AppBase
 
         flow_vals1 = [];  
         flow_vals2 = [];
+        flow_markers1 = [];  % boolean arrays to track whether flow value is new or old
+        flow_markers2 = [];
 
         pressure_vals1 = [];
         pressure_vals2 = [];
@@ -279,7 +283,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             editField.BackgroundColor = originalColor;
         end
 
-        function [newFlowIndicator, flow_value1, flow_value2, ...
+        function [newFlow, flow_value1, flow_value2, ...
                 pressure_value1, pressure_value2, pressure_value3] = parseArduinoData(app, line)
 
             % PARSEARDUINODATA Parses a line of serial data from the Arduino.
@@ -292,7 +296,8 @@ classdef CCTA_exported < matlab.apps.AppBase
             %       LINE - A string containing the raw serial message from the Arduino
             %
             %   Outputs:
-            %       NEWFLOWINDICATOR  - 'Y' if new flow data, 'N' or 'X' otherwise
+            %       NEWFLOWINDICATOR   - True/false whether a new flow
+            %                            value was received
             %       FLOW1              - Flow rate from sensor 1 (L/min)
             %       FLOW2              - Flow rate from sensor 2 (L/min)
             %       P1                 - Calibrated pressure from sensor 1 (mmHg)
@@ -308,7 +313,7 @@ classdef CCTA_exported < matlab.apps.AppBase
                     return;
                 elseif contains(line, "RECEIVED")
                     % Reuse last known values to prevent random dips in data plots
-                    newFlowIndicator = 'N';
+                    newFlow = 'N';
                     flow_value1 = app.flow_vals1(end);
                     flow_value2 = app.flow_vals2(end);
                     pressure_value1 = app.pressure_vals1(end);
@@ -355,6 +360,16 @@ classdef CCTA_exported < matlab.apps.AppBase
                 pressure_value2  = tokens{7} - app.SHO_Pressure2;
                 pressure_value3  = tokens{9} - app.SHO_Pressure3;
 
+                if strcmp(newFlowIndicator,'Y')
+                    newFlow = true;
+                elseif strcmp(newFlowIndicator,'N')
+                    newFlow = false;
+                else
+                    uialert(app.UIFigure, sprintf("Unrecognized new flow indicator received: %s",newFlowIndicator), ...
+                        "Unrecognized message");
+                    newFlow = false;
+                end
+
                 % Update pump power UI under PID control to show
                 % functionality to user
                 if app.PumpControlMode == "Auto"
@@ -368,7 +383,7 @@ classdef CCTA_exported < matlab.apps.AppBase
 
             catch ME
                 % Assign default error values
-                newFlowIndicator = 'X';
+                newFlow = false;
                 flow_value1 = -1;
                 flow_value2 = -1;
                 pressure_value1 = -1;
@@ -499,7 +514,7 @@ classdef CCTA_exported < matlab.apps.AppBase
                 end
 
                 % Read sensor data
-                [~, flow_value1, flow_value2, ...
+                [newFlow, flow_value1, flow_value2, ...
                     pressure_value1, pressure_value2, pressure_value3] = app.parseArduinoData(line);
 
                 % Append new sensor data
@@ -508,8 +523,9 @@ classdef CCTA_exported < matlab.apps.AppBase
                 app.setpoint_ids = [app.setpoint_ids app.PID_setpoint_id];
 
                 app.flow_vals1 = [app.flow_vals1 flow_value1];  
-
                 app.flow_vals2 = [app.flow_vals2 flow_value2];
+                app.flow_markers1 = [app.flow_markers1 newFlow];
+                app.flow_markers2 = [app.flow_markers2 newFlow];
 
                 app.pressure_vals1 = [app.pressure_vals1 pressure_value1];
                 app.pressure_vals2 = [app.pressure_vals2 pressure_value2];
@@ -850,10 +866,28 @@ classdef CCTA_exported < matlab.apps.AppBase
             t = toc(app.mainLoopTime);
 
             if app.SimulateDataCheckBox.Value
-                % Simulate data in GUI (for testing)
-                line = "NF: N, F1: 1.50, F2: 2.50, P1R: 1023, P1: 80.00, P2R: 740, P2: 50.00, P3R: 350, P3: 20.00 | MODE: Manual | PMP: 128 | PID_ID: Pressure1 SP: 60.00, Kp: 1.00, Ki: 0.10, Kd: 0.01 | BPM: 75, AMP: 80";
+                %% Simulate data values
+                % Simulate once-per-second "NF: Y"
+                NF = string(abs(mod(t, 1)) < 0.05);
+                NF = replace(NF, {'true','false'}, {'Y','N'});
+
+                % Simulate time-varying sinusoidal data
+                freq = 0.3; % Hz for all signals
+                ampF = 1; % Amplitude for flow (L/min)
+                ampP = 20;  % Amplitude for pressure (mmHg)
+
+                F1 = 1 + ampF * sin(2 * pi * freq * t);
+                F2 = 3 + ampF * cos(2 * pi * freq * t);
+                P1 = 20 + ampP * sin(2 * pi * freq * t);
+                P2 = 40 + ampP * cos(2 * pi * freq * t);
+                P3 = 60 + ampP * sin(2 * pi * freq * t + pi/4);
+
+                % Generate a fake serial line
+                line = sprintf("NF: %s, F1: %.2f, F2: %.2f, P1R: 1023, P1: %.2f, P2R: 740, P2: %.2f, P3R: 350, P3: %.2f | MODE: Manual | PMP: 128 | PID_ID: Pressure1 SP: 60.00, Kp: 1.00, Ki: 0.10, Kd: 0.01 | BPM: 75, AMP: 80", ...
+                    NF, F1, F2, P1, P2, P3);
                 success = true;
             else
+                %% Read data in from Arduino
                 if app.isConnected
                     try
                         success = app.waitForArduinoMessage();
@@ -1174,6 +1208,10 @@ classdef CCTA_exported < matlab.apps.AppBase
             %
             %   UPDATEDATAPLOTS() updates existing plot data instead of redrawing axes.
             %   Only updates legends if visibility toggles have changed.
+            %
+            %   Inputs:
+            %       NEWFLOW - Indicator ('Y' or 'N') whether a new or old 
+            %           flow value has been sent
 
             if app.PauseGraphsButton.Value == true || ~app.isConnected
                 drawnow;
@@ -1227,21 +1265,32 @@ classdef CCTA_exported < matlab.apps.AppBase
 
             % Update flow lines
             if app.Flow1_GraphEnable.Value
+                % Line without markers
                 set(app.flow1Line, 'XData', app.t, 'YData', app.flow_vals1);
+
+                % Markers
+                markerIndices1 = find(app.flow_markers1);
+                set(app.flow1MarkerLine, 'XData', app.t(markerIndices1), ...
+                    'YData', app.flow_vals1(markerIndices1));
             else
                 set(app.flow1Line, 'XData', nan, 'YData', nan);
-            end
-            if app.Flow2_GraphEnable.Value
-                set(app.flow2Line, 'XData', app.t, 'YData', app.flow_vals2);
-            else
-                set(app.flow2Line, 'XData', nan, 'YData', nan);
+                set(app.flow1MarkerLine, 'XData', nan, 'YData', nan);
             end
 
-            if contains(app.PID_setpoint_id, "Flow")
-                set(app.flowTargetLine, 'XData', app.t, 'YData', ones(1,length(app.t))*app.PID_setpoint);
+            % Update flow2 line
+            if app.Flow2_GraphEnable.Value
+                % Line without markers
+                set(app.flow2Line, 'XData', app.t, 'YData', app.flow_vals2);
+
+                % Markers
+                markerIndices2 = find(app.flow_markers2);
+                set(app.flow2MarkerLine, 'XData', app.t(markerIndices2), ...
+                    'YData', app.flow_vals2(markerIndices2));
             else
-                set(app.flowTargetLine, 'XData', nan, 'YData', nan);
+                set(app.flow2Line, 'XData', nan, 'YData', nan);
+                set(app.flow2MarkerLine, 'XData', nan, 'YData', nan);
             end
+
 
             % Determine appropriate y-limit
             if contains(app.PID_setpoint_id, "Flow")
@@ -1569,6 +1618,9 @@ classdef CCTA_exported < matlab.apps.AppBase
             % Initialize flow plot lines and fill with NaNs
             app.flow1Line = plot(app.FlowAxes, nan, nan, 'Color', app.COLOR_FLOW*0.7, 'DisplayName', app.flow1_label, 'LineWidth', lineWidth);
             app.flow2Line = plot(app.FlowAxes, nan, nan, 'Color', [0 0 0], 'DisplayName', app.flow2_label, 'LineWidth', lineWidth);
+            app.flow1MarkerLine = plot(app.FlowAxes, nan, nan, 'o', 'MarkerSize', 5, 'MarkerEdgeColor', app.COLOR_FLOW*0.7, 'LineStyle', 'none', 'HandleVisibility', 'off');  % marker lines to highlight new flow values
+            app.flow2MarkerLine = plot(app.FlowAxes, nan, nan, 'o', 'MarkerSize', 5, 'MarkerEdgeColor', [0 0 0], 'LineStyle', 'none', 'DisplayName', 'New Values');  % Only add one marker line (black one) to legend for clarity
+
             app.flowTargetLine = plot(app.FlowAxes, nan, nan, 'r--', 'DisplayName', 'Target', 'LineWidth', lineWidth);
             app.flowFill = fill(app.FlowAxes, nan(1,4), nan(1,4), app.COLOR_FLOW*0.6, 'FaceAlpha', 0.2, 'EdgeColor', 'none', 'DisplayName', 'Roll. Avg.');
 
