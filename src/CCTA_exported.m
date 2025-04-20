@@ -1994,36 +1994,42 @@ classdef CCTA_exported < matlab.apps.AppBase
         function KpFlowEditFieldValueChanged(app, event)
             app.Kp_flow = app.KpFlowEditField.Value;
             app.dimEditFieldTemporarily(app.KpFlowEditField);
+            app.sendPIDConfigToArduino();
         end
 
         % Value changed function: KiFlowEditField
         function KiFlowEditFieldValueChanged(app, event)
             app.Ki_flow = app.KiFlowEditField.Value;
             app.dimEditFieldTemporarily(app.KiFlowEditField);
+            app.sendPIDConfigToArduino();
         end
 
         % Value changed function: KdFlowEditField
         function KdFlowEditFieldValueChanged(app, event)
             app.Kd_flow = app.KdFlowEditField.Value;
             app.dimEditFieldTemporarily(app.KdFlowEditField);
+            app.sendPIDConfigToArduino();
         end
 
         % Value changed function: KpPressureEditField
         function KpPressureEditFieldValueChanged(app, event)
             app.Kp_pressure = app.KpPressureEditField.Value;
             app.dimEditFieldTemporarily(app.KpPressureEditField); 
+            app.sendPIDConfigToArduino();
         end
 
         % Value changed function: KiPressureEditField
         function KiPressureEditFieldValueChanged(app, event)
             app.Ki_pressure = app.KiPressureEditField.Value;
             app.dimEditFieldTemporarily(app.KiPressureEditField);  
+            app.sendPIDConfigToArduino();
         end
 
         % Value changed function: KdPressureEditField
         function KdPressureEditFieldValueChanged(app, event)
             app.Kd_pressure = app.KdPressureEditField.Value;
             app.dimEditFieldTemporarily(app.KdPressureEditField); 
+            app.sendPIDConfigToArduino();
         end
 
         % Value changed function: SimulateDataCheckBox
