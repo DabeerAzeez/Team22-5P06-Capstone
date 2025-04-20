@@ -126,8 +126,6 @@ classdef CCTA_exported < matlab.apps.AppBase
         ConsoleTextArea                matlab.ui.control.TextArea
     end
 
-    % TODO: Add "refresh ports" button
-
     properties (Access = private)
         % Constants
         % TODO: Add more UI elements to be able to change these through UI
@@ -139,7 +137,6 @@ classdef CCTA_exported < matlab.apps.AppBase
         CALIBRATION_DURATION = 20;      % # of seconds to run calibration procedure
         ROLLING_AVERAGE_DURATION = 10;  % # of seconds for rolling average
         CALIBRATION_REST_PERIOD = 5;    % # of seconds to rest before collecting static heads for calibration
-        DT_PID = 0.1;                   % Time step for integral/derivative PID calculations (adjust based on system response)
         PID_SCALING_FACTOR = 10000;
         SERIAL_COMMS_TIMEOUT = 5;  % # of seconds to wait for the next message over serial before showing a uialert
 
