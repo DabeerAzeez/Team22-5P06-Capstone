@@ -310,7 +310,7 @@ classdef CCTA_exported < matlab.apps.AppBase
                     return;
                 elseif contains(line, "RECEIVED")
                     % Reuse last known values to prevent random dips in data plots
-                    newFlow = 'N';
+                    newFlow = false;
                     flow_value1 = app.flow_vals1(end);
                     flow_value2 = app.flow_vals2(end);
                     pressure_value1 = app.pressure_vals1(end);
@@ -1251,12 +1251,12 @@ classdef CCTA_exported < matlab.apps.AppBase
                 pressureMax = max([app.pressure_vals1, app.pressure_vals2, app.pressure_vals3]);
             end
 
-            % Determine appropriate y-limit
             pressureMin = 0;
             pressureDefaultMax = 100;
             pressureMax = max(pressureDefaultMax, pressureMax * 1.1);  % Add 10% headroom
             ylim(app.PressureAxes, [pressureMin pressureMax]);
 
+            % Shade area corresponding to rolling average
             ylims = ylim(app.PressureAxes);
             x_fill = [cutoffTime, currentTime, currentTime, cutoffTime];
             y_fill = [ylims(1), ylims(1), ylims(2), ylims(2)];
@@ -1290,6 +1290,11 @@ classdef CCTA_exported < matlab.apps.AppBase
                 set(app.flow2MarkerLine, 'XData', nan, 'YData', nan);
             end
 
+            if contains(app.PID_setpoint_id, "Flow")
+                set(app.flowTargetLine, 'XData', app.t, 'YData', ones(1,length(app.t))*app.PID_setpoint);
+            else
+                set(app.flowTargetLine, 'XData', nan, 'YData', nan);
+            end
 
             % Determine appropriate y-limit
             if contains(app.PID_setpoint_id, "Flow")
@@ -1707,14 +1712,16 @@ classdef CCTA_exported < matlab.apps.AppBase
             %   to parse this command and apply the PID control logic internally.
 
             % Select correct PID coefficients based on setpoint ID
-            if strcmp(app.PID_setpoint_id, "Flow1") || strcmp(app.PID_setpoint_id, "Flow2")
+            if contains(app.PID_setpoint_id, "Flow")
                 Kp = app.Kp_flow;
                 Ki = app.Ki_flow;
                 Kd = app.Kd_flow;
-            else
+            elseif contains(app.PID_setpoint_id, "Pressure")
                 Kp = app.Kp_pressure;
                 Ki = app.Ki_pressure;
                 Kd = app.Kd_pressure;
+            else
+                return;  % invalid PID setpoint ID
             end
 
             % Scale all floats by 10000 and convert to integers
@@ -2751,6 +2758,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.PressureGraphPanel = uipanel(app.MainTab);
             app.PressureGraphPanel.BorderColor = [0.4902 0.4902 0.4902];
             app.PressureGraphPanel.Enable = 'off';
+            app.PressureGraphPanel.HighlightColor = [0.4902 0.4902 0.4902];
             app.PressureGraphPanel.BackgroundColor = [0.8392 0.8314 0.8588];
             app.PressureGraphPanel.FontAngle = 'italic';
             app.PressureGraphPanel.Position = [330 172 435 329];
