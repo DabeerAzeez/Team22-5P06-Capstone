@@ -84,8 +84,10 @@ float pidPrevError = 0.0;
 float pidDerivative = 0.0;
 
 // --- Rolling Error History ---
-const int PID_HISTORY_LEN = 40;
-float rollingErrors[PID_HISTORY_LEN] = { 0 };
+const int PID_HISTORY_LEN_PRESSURE = 40;
+const int PID_HISTORY_LEN_FLOW = 5;
+float rollingErrorsPressure[PID_HISTORY_LEN_PRESSURE] = { 0 };
+float rollingErrorsFlow[PID_HISTORY_LEN_FLOW] = { 0 };
 int rollingIndex = 0;
 
 // --- PID Timing ---
@@ -283,7 +285,8 @@ void processSerial(String inputString) {
     // Reset PID error calculations
     pidIntegral = 0.0;
     pidPrevError = 0.0;
-    rollingErrors[PID_HISTORY_LEN] = { 0 };
+    rollingErrorsPressure[PID_HISTORY_LEN_PRESSURE] = { 0 };
+    rollingErrorsFlow[PID_HISTORY_LEN_FLOW] = { 0 };
     rollingIndex = 0;
 
     // Set pump control mode to auto so main loop can handle it from there
@@ -412,8 +415,24 @@ float interpolatePressure(float adc_value, int sensorNum) {
  * using analogWrite. The output is constrained within the PWM range.
  */
 void runPIDControl() {
+  // Select appropriate rolling error array and length based on pidSetpointId
+  float* rollingErrors;
+  int* pidHistoryLen;
+  
+  if (pidSetpointId.indexOf("Pressure") != -1) {
+    rollingErrors = rollingErrorsPressure;
+    pidHistoryLen = &PID_HISTORY_LEN_PRESSURE;
+  } else if (pidSetpointId.indexOf("Flow") != -1) {
+    rollingErrors = rollingErrorsFlow;
+    pidHistoryLen = &PID_HISTORY_LEN_FLOW;
+  } else {
+    // Default to Pressure if unknown
+    rollingErrors = rollingErrorsPressure;
+    pidHistoryLen = &PID_HISTORY_LEN_PRESSURE;
+  }
+
   // Prevent integral from accumulating infinitely by removing oldest error term's contribution
-  int oldestIndex = (rollingIndex + 1) % PID_HISTORY_LEN;
+  int oldestIndex = (rollingIndex + 1) % *pidHistoryLen;
   float oldestError = rollingErrors[oldestIndex];
   pidIntegral -= oldestError * (pidIntervalMS / 1000.0);
 
@@ -421,7 +440,7 @@ void runPIDControl() {
   float currentValue = getSensorValue(pidSetpointId);
   pidError = pidSetpoint - currentValue;
   rollingErrors[rollingIndex] = pidError;
-  rollingIndex = (rollingIndex + 1) % PID_HISTORY_LEN;
+  rollingIndex = (rollingIndex + 1) % *pidHistoryLen;
 
   pidIntegral += pidError * (pidIntervalMS / 1000.0);
   pidDerivative = (pidError - pidPrevError) / (pidIntervalMS / 1000.0);
