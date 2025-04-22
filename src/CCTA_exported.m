@@ -1267,13 +1267,16 @@ classdef CCTA_exported < matlab.apps.AppBase
                 % Line without markers
                 set(app.flow1Line, 'XData', app.t, 'YData', app.flow_vals1);
 
+                % TODO: Fix serial communication architecture so new flow
+                % values are correctly indicated
+                %
                 % Markers
-                markerIndices1 = find(app.flow_markers1);
-                set(app.flow1MarkerLine, 'XData', app.t(markerIndices1), ...
-                    'YData', app.flow_vals1(markerIndices1));
+                % markerIndices1 = find(app.flow_markers1);
+                % set(app.flow1MarkerLine, 'XData', app.t(markerIndices1), ...
+                %     'YData', app.flow_vals1(markerIndices1));
             else
                 set(app.flow1Line, 'XData', nan, 'YData', nan);
-                set(app.flow1MarkerLine, 'XData', nan, 'YData', nan);
+                % set(app.flow1MarkerLine, 'XData', nan, 'YData', nan);
             end
 
             % Update flow2 line
@@ -1281,13 +1284,16 @@ classdef CCTA_exported < matlab.apps.AppBase
                 % Line without markers
                 set(app.flow2Line, 'XData', app.t, 'YData', app.flow_vals2);
 
+                % TODO: Fix serial communication architecture so new flow
+                % values are correctly indicated
+                %
                 % Markers
-                markerIndices2 = find(app.flow_markers2);
-                set(app.flow2MarkerLine, 'XData', app.t(markerIndices2), ...
-                    'YData', app.flow_vals2(markerIndices2));
+                % markerIndices2 = find(app.flow_markers2);
+                % set(app.flow2MarkerLine, 'XData', app.t(markerIndices2), ...
+                %     'YData', app.flow_vals2(markerIndices2));
             else
                 set(app.flow2Line, 'XData', nan, 'YData', nan);
-                set(app.flow2MarkerLine, 'XData', nan, 'YData', nan);
+                % set(app.flow2MarkerLine, 'XData', nan, 'YData', nan);
             end
 
             if contains(app.PID_setpoint_id, "Flow")
@@ -1622,11 +1628,14 @@ classdef CCTA_exported < matlab.apps.AppBase
             % Initialize flow plot lines and fill with NaNs
             app.flow1Line = plot(app.FlowAxes, nan, nan, 'Color', app.COLOR_FLOW*0.7, 'DisplayName', app.flow1_label, 'LineWidth', lineWidth);
             app.flow2Line = plot(app.FlowAxes, nan, nan, 'Color', [0 0 0], 'DisplayName', app.flow2_label, 'LineWidth', lineWidth);
-            if ~isempty(app.flow1MarkerLine) && isgraphics(app.flow1MarkerLine)
-                delete(app.flow1MarkerLine);  % Forces delete of Flow1MarkerLine because cla() doesn't work when HandleVisibility is 'off'
-            end
-            app.flow1MarkerLine = plot(app.FlowAxes, nan, nan, 'o', 'MarkerSize', 5, 'MarkerEdgeColor', app.COLOR_FLOW*0.7, 'LineStyle', 'none', 'HandleVisibility', 'off');  % marker lines to highlight new flow values
-            app.flow2MarkerLine = plot(app.FlowAxes, nan, nan, 'o', 'MarkerSize', 5, 'MarkerEdgeColor', [0 0 0], 'LineStyle', 'none', 'DisplayName', 'New Values');  % Only add one marker line (black one) to legend for clarity
+
+            % TODO: Fix serial communication architecture so new flow
+            % values are correctly indicated
+            % if ~isempty(app.flow1MarkerLine) && isgraphics(app.flow1MarkerLine)
+            %     delete(app.flow1MarkerLine);  % Forces delete of Flow1MarkerLine because cla() doesn't work when HandleVisibility is 'off'
+            % end
+            % app.flow1MarkerLine = plot(app.FlowAxes, nan, nan, 'o', 'MarkerSize', 5, 'MarkerEdgeColor', app.COLOR_FLOW*0.7, 'LineStyle', 'none', 'HandleVisibility', 'off');  % marker lines to highlight new flow values
+            % app.flow2MarkerLine = plot(app.FlowAxes, nan, nan, 'o', 'MarkerSize', 5, 'MarkerEdgeColor', [0 0 0], 'LineStyle', 'none', 'DisplayName', 'New Values');  % Only add one marker line (black one) to legend for clarity
 
             app.flowTargetLine = plot(app.FlowAxes, nan, nan, 'r--', 'DisplayName', 'Target', 'LineWidth', lineWidth);
             app.flowFill = fill(app.FlowAxes, nan(1,4), nan(1,4), app.COLOR_FLOW*0.6, 'FaceAlpha', 0.2, 'EdgeColor', 'none', 'DisplayName', 'Roll. Avg.');
