@@ -2305,6 +2305,14 @@ classdef CCTA_exported < matlab.apps.AppBase
                 app.PumpControlModeDropdownLabel.Enable = "off";
                 app.PumpPowerLamp.Color = app.COLOR_LAMP_OFF;
                 app.pumpStopped = true;
+
+                app.Pressure1_EditField_Target.Enable = "off";
+                app.Pressure2_EditField_Target.Enable = "off";
+                app.Pressure3_EditField_Target.Enable = "off";
+                app.Flow1_EditField_Target.Enable = "off";
+                app.Flow2_EditField_Target.Enable = "off";
+                app.Pressure_ResetAllTargetButton.Enable = "off";
+                app.Flow_ResetAllTargetButton.Enable = "off";
             else
                 app.PumpPowerSpinner.Enable = "on";
                 app.PumpPowerSlider.Enable = "on";
@@ -2313,6 +2321,14 @@ classdef CCTA_exported < matlab.apps.AppBase
                 app.PumpControlModeDropdownLabel.Enable = "on";
                 app.PumpPowerLamp.Color = app.COLOR_CONNECTED;
                 app.pumpStopped = false;
+
+                app.Pressure1_EditField_Target.Enable = "on";
+                app.Pressure2_EditField_Target.Enable = "on";
+                app.Pressure3_EditField_Target.Enable = "on";
+                app.Flow1_EditField_Target.Enable = "on";
+                app.Flow2_EditField_Target.Enable = "on";
+                app.Pressure_ResetAllTargetButton.Enable = "on";
+                app.Flow_ResetAllTargetButton.Enable = "on";
             end
         end
 
@@ -2758,7 +2774,6 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.PressureGraphPanel = uipanel(app.MainTab);
             app.PressureGraphPanel.BorderColor = [0.4902 0.4902 0.4902];
             app.PressureGraphPanel.Enable = 'off';
-            app.PressureGraphPanel.HighlightColor = [0.4902 0.4902 0.4902];
             app.PressureGraphPanel.BackgroundColor = [0.8392 0.8314 0.8588];
             app.PressureGraphPanel.FontAngle = 'italic';
             app.PressureGraphPanel.Position = [330 172 435 329];
