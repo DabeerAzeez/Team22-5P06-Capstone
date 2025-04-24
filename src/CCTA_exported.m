@@ -137,7 +137,7 @@ classdef CCTA_exported < matlab.apps.AppBase
         CALIBRATION_DURATION = 20;      % # of seconds to run calibration procedure
         ROLLING_AVERAGE_DURATION = 10;  % # of seconds for rolling average
         CALIBRATION_REST_PERIOD = 5;    % # of seconds to rest before collecting static heads for calibration
-        PID_SCALING_FACTOR = 10000;
+        SERIAL_SCALING_FACTOR = 100;  % Scaling factor for sending floats over serial as integers
         SERIAL_COMMS_TIMEOUT = 5;  % # of seconds to wait for the next message over serial before showing a uialert
 
         PULSATILE_DEFAULT_BPM = 40;
@@ -174,8 +174,8 @@ classdef CCTA_exported < matlab.apps.AppBase
         flowFill
 
         % PID Variables
-        Kp_flow = 5;  % PID coefficients when controlling flow
-        Ki_flow = 0.5;  % Default values defined here
+        Kp_flow = 6;  % PID coefficients when controlling flow
+        Ki_flow = 3;  % Default values defined here
         Kd_flow = 0;
 
         Kp_pressure = 0.2;  % PID coefficients when controlling pressure
@@ -225,10 +225,6 @@ classdef CCTA_exported < matlab.apps.AppBase
         pulsatileFlowValues;
         pulsatileFlowTimes;
         pulsatileFlowPeriod;
-
-        SHO_Pressure1 = 0;
-        SHO_Pressure2 = 0;
-        SHO_Pressure3 = 0;
 
         PID_setpoint_id = "None";  % Identifier as to which sensor's setpoint is influencing PID control, since only one sensor at a time can do so
         PID_setpoint = "None";
@@ -332,30 +328,30 @@ classdef CCTA_exported < matlab.apps.AppBase
                 % Parse the incoming line using textscan
                 tokens = textscan(line, ...
                     ['NF: %c, F1: %f, F2: %f, ' ...
-                    'P1R: %d, P1: %f, ' ...
-                    'P2R: %d, P2: %f, ' ...
-                    'P3R: %d, P3: %f ' ...
-                    '| MODE: %s ' ...
+                    'P1R: %d, P1: %f (%f), ' ...
+                    'P2R: %d, P2: %f (%f), ' ...
+                    'P3R: %d, P3: %f (%f) ' ...
+                    '| MODE: %[^|] ' ...
                     '| PMP: %d ' ...
-                    '| PID_ID: %s SP: %f, Kp: %f, Ki: %f, Kd: %f ' ...
+                    '| PID_ID: %[^ ] SP: %f, Kp: %f, Ki: %f, Kd: %f ' ...
                     '| BPM: %d, AMP: %d']);
 
                 % Expected number of fields
-                nExpectedDataPoints = 18;
+                nExpectedDataPoints = 21;
 
-                % Check that all fields were successfully parsed
-                nActual = numel(tokens);
-                if nActual ~= nExpectedDataPoints
-                    error("Serial parsing failed. Expected %d values but got %d. Line: %s", nExpectedDataPoints, nActual, line);
+                % Check that all fields are non-empty and successfully parsed
+                if numel(tokens) ~= nExpectedDataPoints || any(cellfun(@isempty, tokens))
+                    error("Serial parsing failed. Expected %d fields, got %d, or one or more fields are empty. Line: %s", ...
+                        nExpectedDataPoints, numel(tokens), line);
                 end
 
                 % Only unpack relevant fields
                 newFlowIndicator = char(tokens{1});              % 'Y' or 'N'
                 flow_value1      = tokens{2};
                 flow_value2      = tokens{3};
-                pressure_value1  = tokens{5} - app.SHO_Pressure1;
-                pressure_value2  = tokens{7} - app.SHO_Pressure2;
-                pressure_value3  = tokens{9} - app.SHO_Pressure3;
+                pressure_value1  = tokens{5};
+                pressure_value2  = tokens{8};
+                pressure_value3  = tokens{11};
 
                 if strcmp(newFlowIndicator,'Y')
                     newFlow = true;
@@ -370,7 +366,7 @@ classdef CCTA_exported < matlab.apps.AppBase
                 % Update pump power UI under PID control to show
                 % functionality to user
                 if app.PumpControlMode == "Auto"
-                    flowDutyCycle = tokens{11};
+                    flowDutyCycle = tokens{14};
                     app.setPumpPower(flowDutyCycle,'dutyCycle','uiOnly');
                 end
 
@@ -881,9 +877,13 @@ classdef CCTA_exported < matlab.apps.AppBase
                 P2 = 40 + ampP * cos(2 * pi * freq * t);
                 P3 = 60 + ampP * sin(2 * pi * freq * t + pi/4);
 
+                SHO1 = 7.02;
+                SHO2 = 9.05;
+                SHO3 = 5.32;
+
                 % Generate a fake serial line
-                line = sprintf("NF: %s, F1: %.2f, F2: %.2f, P1R: 1023, P1: %.2f, P2R: 740, P2: %.2f, P3R: 350, P3: %.2f | MODE: Manual | PMP: 128 | PID_ID: Pressure1 SP: 60.00, Kp: 1.00, Ki: 0.10, Kd: 0.01 | BPM: 75, AMP: 80", ...
-                    NF, F1, F2, P1, P2, P3);
+                line = sprintf("NF: %s, F1: %.2f, F2: %.2f, P1R: 1023, P1: %.2f (%.2f), P2R: 740, P2: %.2f (%.2f), P3R: 350, P3: %.2f (%.2f) | MODE: Manual | PMP: 128 | PID_ID: Pressure1 SP: 60.00, Kp: 1.00, Ki: 0.10, Kd: 0.01 | BPM: 75, AMP: 80", ...
+                    NF, F1, F2, P1, SHO1, P2, SHO2, P3, SHO3);
                 success = true;
             else
                 %% Read data in from Arduino
@@ -1329,7 +1329,7 @@ classdef CCTA_exported < matlab.apps.AppBase
         end
         
         function continueCalibration(app)
-            %CONTINUECALIBRATION Performs static head offset calibration.
+            %CONTINUECALIBRATION Performs static head offset (SHO) calibration.
             %
             %   CONTINUECALIBRATION() disables the UI, powers off the pump to allow
             %   pressure stabilization, collects pressure data, calculates average values,
@@ -1367,14 +1367,18 @@ classdef CCTA_exported < matlab.apps.AppBase
             avg2 = mean(app.pressure_vals2);
             avg3 = mean(app.pressure_vals3);
 
-            % Store averages as static head offset calibration values
-            app.SHO_Pressure1 = avg1;
-            app.Pressure1_EditField_SHO.Value = avg1;
-            app.SHO_Pressure2 = avg2;
-            app.Pressure2_EditField_SHO.Value = avg2;
-            app.SHO_Pressure3 = avg3;
-            app.Pressure3_EditField_SHO.Value = avg3;
+            % Store averages as SHO calibration values
+            SHO_Pressure1 = avg1;
+            SHO_Pressure2 = avg2;
+            SHO_Pressure3 = avg3;
+            
+            % Send SHO values to Arduino
+            app.sendSHOtoArduino('custom',SHO_Pressure1,SHO_Pressure2,SHO_Pressure3);
 
+            % Update UI
+            app.Pressure1_EditField_SHO.Value = SHO_Pressure1;
+            app.Pressure2_EditField_SHO.Value = SHO_Pressure2;
+            app.Pressure3_EditField_SHO.Value = SHO_Pressure3;
             app.clearDataArrays();  % to avoid plots from randomly jumping down
 
             % Show confirmation dialog with the results (nicer formatting)
@@ -1472,6 +1476,9 @@ classdef CCTA_exported < matlab.apps.AppBase
             [mu3, s3] = mu_sigma(p3);
             [mu4, s4] = mu_sigma(f1);
             [mu5, s5] = mu_sigma(f2);
+
+            % TODO: round off sd to one significant figure, and means to
+            % the same # of decimal places as the sd
 
             % Store in struct
             avgStruct = struct( ...
@@ -1691,7 +1698,36 @@ classdef CCTA_exported < matlab.apps.AppBase
         end
 
         
-        function sendArduinoMessage(app, message)
+        function sendArduinoMessage(app, message, varargin)
+            %SENDARDUINOMESSAGE Sends a message to the Arduino if conditions are met.
+            %
+            %   sendArduinoMessage(app, message)
+            %       Sends the specified message to the Arduino only if the simulation
+            %       mode is off and the pump is not stopped.
+            %
+            %   sendArduinoMessage(app, message, overridePumpStopCheck)
+            %       Allows overriding the pump stop check. If overridePumpStopCheck is
+            %       true, the message is sent regardless of the pump's stopped state.
+            %
+            %   Inputs:
+            %       app - The application instance containing properties like
+            %             arduinoObj, isConnected, SimulateDataCheckBox, pumpStopped.
+            %       message - A string message to send to the Arduino.
+            %       overridePumpStopCheck (optional) - Boolean flag to override the
+            %             pump stopped check (default is false).
+            %
+            %   Example:
+            %       sendArduinoMessage(app, 'PUMP ON')
+            %       sendArduinoMessage(app, 'PUMP ON', true)
+
+            % Default overridePumpStopCheck to false
+            overridePumpStopCheck = false;
+
+            % If a third argument is passed, use it as overridePumpStopCheck
+            if ~isempty(varargin)
+                overridePumpStopCheck = varargin{1};
+            end
+
             if app.isConnected
                 try
                     % Send pump power command to Arduino
@@ -1700,7 +1736,7 @@ classdef CCTA_exported < matlab.apps.AppBase
                     end
 
                     % Send command to Arduino
-                    if app.SimulateDataCheckBox.Value == false && ~app.pumpStopped
+                    if app.SimulateDataCheckBox.Value == false && (~app.pumpStopped || overridePumpStopCheck)
                         writeline(app.arduinoObj,message);
                         app.waitForArduinoMessage();  % Helps prevent crashing
                     end
@@ -1736,10 +1772,10 @@ classdef CCTA_exported < matlab.apps.AppBase
             % Scale all floats by 10000 and convert to integers
             cmd = sprintf("PID: %s, %d, %d, %d, %d", ...
                 app.PID_setpoint_id, ...
-                round(app.PID_setpoint * app.PID_SCALING_FACTOR), ...
-                round(Kp * app.PID_SCALING_FACTOR), ...
-                round(Ki * app.PID_SCALING_FACTOR), ...
-                round(Kd * app.PID_SCALING_FACTOR));
+                round(app.PID_setpoint * app.SERIAL_SCALING_FACTOR), ...
+                round(Kp * app.SERIAL_SCALING_FACTOR), ...
+                round(Ki * app.SERIAL_SCALING_FACTOR), ...
+                round(Kd * app.SERIAL_SCALING_FACTOR));
 
             app.sendArduinoMessage(cmd);
         end
@@ -1747,6 +1783,47 @@ classdef CCTA_exported < matlab.apps.AppBase
         function printToConsole(app, message)
             app.ConsoleTextArea.Value{end+1} = char(message);
         end
+        
+        function sendSHOtoArduino(app, mode, SHO_Pressure1, SHO_Pressure2, SHO_Pressure3)
+            % SENDSHOTOARDUINO Sends static head offset (SHO) pressures to the Arduino.
+            %
+            %   This function formats and transmits a command string to the Arduino
+            %   containing three pressure values used for static head offset calibration.
+            %   The values are scaled by SERIAL_SCALING_FACTOR and formatted as integers.
+            %
+            %   If called with the mode 'custom', the function uses the three provided
+            %   pressure values (SHO_Pressure1, SHO_Pressure2, SHO_Pressure3). Otherwise,
+            %   it retrieves the values from the app's UI fields:
+            %   Pressure1_EditField_SHO, Pressure2_EditField_SHO, and Pressure3_EditField_SHO.
+            %
+            %   The Arduino is expected to parse the command in the format:
+            %   "SHO: <P1>, <P2>, <P3>"
+            %
+            %   Example usage:
+            %       app.sendSHOtoArduino();  % Uses values from UI
+            %       app.sendSHOtoArduino('custom', 12.5, 18.0, 15.3);  % Uses custom values
+
+            % If custom SHO values are passed, update the UI
+            if nargin >= 5 && strcmp(mode, 'custom')
+                app.Pressure1_EditField_SHO.Value = SHO_Pressure1;
+                app.Pressure2_EditField_SHO.Value = SHO_Pressure2;
+                app.Pressure3_EditField_SHO.Value = SHO_Pressure3;
+            end
+
+            % Take SHO values from UI
+            p1 = double(app.Pressure1_EditField_SHO.Value);
+            p2 = double(app.Pressure2_EditField_SHO.Value);
+            p3 = double(app.Pressure3_EditField_SHO.Value);
+
+            % Send values to Arduino
+            msg = sprintf("SHO: %d, %d, %d", ...
+                round(p1 * app.SERIAL_SCALING_FACTOR), ...
+                round(p2 * app.SERIAL_SCALING_FACTOR), ...
+                round(p3 * app.SERIAL_SCALING_FACTOR));
+
+            app.sendArduinoMessage(msg, true);
+        end
+
     end
 
 
@@ -1801,6 +1878,9 @@ classdef CCTA_exported < matlab.apps.AppBase
                     app.setGUIConnectionState(false);
                 end
             elseif app.ConnectDisconnectButton.Text == "Disconnect"
+                % TODO: Prevent serial comms errors from appearing after
+                % disconnect, potentially find a way to stop the main loop
+                % from continuing after this callback is initiated.
                 app.setGUIConnectionState(false);
             end
         end
@@ -2126,20 +2206,20 @@ classdef CCTA_exported < matlab.apps.AppBase
 
         % Value changed function: Pressure1_EditField_SHO
         function Pressure1_EditField_SHOValueChanged(app, event)
-            app.SHO_Pressure1 = app.Pressure1_EditField_SHO.Value;
             app.dimEditFieldTemporarily(app.Pressure1_EditField_SHO);
+            app.sendSHOtoArduino();
         end
 
         % Value changed function: Pressure2_EditField_SHO
         function Pressure2_EditField_SHOValueChanged2(app, event)
-            app.SHO_Pressure2 = app.Pressure2_EditField_SHO.Value;
             app.dimEditFieldTemporarily(app.Pressure2_EditField_SHO);
+            app.sendSHOtoArduino();
         end
 
         % Value changed function: Pressure3_EditField_SHO
         function Pressure3_EditField_SHOValueChanged2(app, event)
-            app.SHO_Pressure3 = app.Pressure3_EditField_SHO.Value;
             app.dimEditFieldTemporarily(app.Pressure3_EditField_SHO);
+            app.sendSHOtoArduino();
         end
 
         % Button pushed function: CalibrateButton
@@ -2219,6 +2299,9 @@ classdef CCTA_exported < matlab.apps.AppBase
 
             app.Flow1_EditField_Target.Value = 0;
             app.Flow2_EditField_Target.Value = 0;
+
+
+         
         end
 
         % Button pushed function: Pressure_ResetAllLabelButton
@@ -2235,14 +2318,7 @@ classdef CCTA_exported < matlab.apps.AppBase
 
         % Button pushed function: Pressure_ResetAllSHOButton
         function Pressure_ResetAllSHOButtonPushed(app, event)
-            app.SHO_Pressure1 = 0;
-            app.Pressure1_EditField_SHO.Value = 0;
-
-            app.SHO_Pressure2 = 0;
-            app.Pressure2_EditField_SHO.Value = 0;
-
-            app.SHO_Pressure3 = 0;
-            app.Pressure3_EditField_SHO.Value = 0;
+            app.sendSHOtoArduino('custom', 0, 0, 0);
         end
 
         % Button pushed function: Flow_ResetAllLabelButton
@@ -2402,7 +2478,7 @@ classdef CCTA_exported < matlab.apps.AppBase
 
             % Create Pressure1_EditField_Target
             app.Pressure1_EditField_Target = uieditfield(app.PressureDetailsPanel, 'numeric');
-            app.Pressure1_EditField_Target.Limits = [0 Inf];
+            app.Pressure1_EditField_Target.Limits = [0 300];
             app.Pressure1_EditField_Target.ValueChangedFcn = createCallbackFcn(app, @Pressure1_EditField_TargetValueChanged, true);
             app.Pressure1_EditField_Target.HorizontalAlignment = 'center';
             app.Pressure1_EditField_Target.Tooltip = {'Target value for PID control'};
@@ -2410,7 +2486,7 @@ classdef CCTA_exported < matlab.apps.AppBase
 
             % Create Pressure2_EditField_Target
             app.Pressure2_EditField_Target = uieditfield(app.PressureDetailsPanel, 'numeric');
-            app.Pressure2_EditField_Target.Limits = [0 Inf];
+            app.Pressure2_EditField_Target.Limits = [0 300];
             app.Pressure2_EditField_Target.ValueChangedFcn = createCallbackFcn(app, @Pressure2_EditField_TargetValueChanged, true);
             app.Pressure2_EditField_Target.HorizontalAlignment = 'center';
             app.Pressure2_EditField_Target.Tooltip = {'Target value for PID control'};
@@ -2418,7 +2494,7 @@ classdef CCTA_exported < matlab.apps.AppBase
 
             % Create Pressure3_EditField_Target
             app.Pressure3_EditField_Target = uieditfield(app.PressureDetailsPanel, 'numeric');
-            app.Pressure3_EditField_Target.Limits = [0 Inf];
+            app.Pressure3_EditField_Target.Limits = [0 300];
             app.Pressure3_EditField_Target.ValueChangedFcn = createCallbackFcn(app, @Pressure3_EditField_TargetValueChanged, true);
             app.Pressure3_EditField_Target.HorizontalAlignment = 'center';
             app.Pressure3_EditField_Target.Tooltip = {'Target value for PID control'};
@@ -2550,6 +2626,7 @@ classdef CCTA_exported < matlab.apps.AppBase
 
             % Create Pressure1_EditField_SHO
             app.Pressure1_EditField_SHO = uieditfield(app.PressureDetailsPanel, 'numeric');
+            app.Pressure1_EditField_SHO.Limits = [-50 300];
             app.Pressure1_EditField_SHO.ValueChangedFcn = createCallbackFcn(app, @Pressure1_EditField_SHOValueChanged, true);
             app.Pressure1_EditField_SHO.HorizontalAlignment = 'center';
             app.Pressure1_EditField_SHO.Tooltip = {'SHO - Static Head Offset. Adjusts for pressure changes caused by fluid height differences in the system.'};
@@ -2557,6 +2634,7 @@ classdef CCTA_exported < matlab.apps.AppBase
 
             % Create Pressure2_EditField_SHO
             app.Pressure2_EditField_SHO = uieditfield(app.PressureDetailsPanel, 'numeric');
+            app.Pressure2_EditField_SHO.Limits = [-50 300];
             app.Pressure2_EditField_SHO.ValueChangedFcn = createCallbackFcn(app, @Pressure2_EditField_SHOValueChanged2, true);
             app.Pressure2_EditField_SHO.HorizontalAlignment = 'center';
             app.Pressure2_EditField_SHO.Tooltip = {'SHO - Static Head Offset. Adjusts for pressure changes caused by fluid height differences in the system.'};
@@ -2564,6 +2642,7 @@ classdef CCTA_exported < matlab.apps.AppBase
 
             % Create Pressure3_EditField_SHO
             app.Pressure3_EditField_SHO = uieditfield(app.PressureDetailsPanel, 'numeric');
+            app.Pressure3_EditField_SHO.Limits = [-50 300];
             app.Pressure3_EditField_SHO.ValueChangedFcn = createCallbackFcn(app, @Pressure3_EditField_SHOValueChanged2, true);
             app.Pressure3_EditField_SHO.HorizontalAlignment = 'center';
             app.Pressure3_EditField_SHO.Tooltip = {'SHO - Static Head Offset. Adjusts for pressure changes caused by fluid height differences in the system.'};
@@ -2639,7 +2718,7 @@ classdef CCTA_exported < matlab.apps.AppBase
 
             % Create Flow1_EditField_Target
             app.Flow1_EditField_Target = uieditfield(app.FlowDetailsPanel, 'numeric');
-            app.Flow1_EditField_Target.Limits = [0 Inf];
+            app.Flow1_EditField_Target.Limits = [0 10];
             app.Flow1_EditField_Target.ValueChangedFcn = createCallbackFcn(app, @Flow1_EditField_TargetValueChanged, true);
             app.Flow1_EditField_Target.HorizontalAlignment = 'center';
             app.Flow1_EditField_Target.Tooltip = {'Target value for PID control'};
@@ -2647,7 +2726,7 @@ classdef CCTA_exported < matlab.apps.AppBase
 
             % Create Flow2_EditField_Target
             app.Flow2_EditField_Target = uieditfield(app.FlowDetailsPanel, 'numeric');
-            app.Flow2_EditField_Target.Limits = [0 Inf];
+            app.Flow2_EditField_Target.Limits = [0 10];
             app.Flow2_EditField_Target.ValueChangedFcn = createCallbackFcn(app, @Flow2_EditField_TargetValueChanged, true);
             app.Flow2_EditField_Target.HorizontalAlignment = 'center';
             app.Flow2_EditField_Target.Tooltip = {'Target value for PID control'};
