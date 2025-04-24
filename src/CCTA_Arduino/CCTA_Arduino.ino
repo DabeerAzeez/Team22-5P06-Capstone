@@ -31,7 +31,7 @@ const unsigned long PRESSURE_SENSOR_READ_INTERVAL = 50;   // Interval for pressu
 const unsigned long FLOW_SENSOR_READ_INTERVAL = 1000;     // Interval for flow readings (ms)
 const unsigned long EXPECTED_MATLAB_MESSAGE_LENGTH = 50;  // Length of expected message from MATLAB
 const unsigned long MAX_DUTY_CYCLE = 255;                 // 8-bit PWM resolution
-const float SERIAL_SCALING_FACTOR = 10000;
+const float SERIAL_SCALING_FACTOR = 100.0;                // Allows receipt of values from -327.67 to 327.67 (0.01 precision) over serial comms
 const bool SIMULATE_VALUES = false;       // Toggle value simulation
 const bool SIMULATE_OSCILLATIONS = true;  // Toggle oscillating simulated values
 
@@ -71,7 +71,7 @@ float SHO_Pressure1 = 0;
 float SHO_Pressure2 = 0;
 float SHO_Pressure3 = 0;
 
-long SHO_Pressure1_Int, SHO_Pressure2_Int, SHO_Pressure3_Int;
+int SHO_Pressure1_Int, SHO_Pressure2_Int, SHO_Pressure3_Int;
 
 
 // ====================================================
@@ -84,7 +84,7 @@ float pidSetpoint = 0;
 float Kp = 0.0, Ki = 0.0, Kd = 0.0;
 
 char pidSetpointIdBuffer[20];              // temporary buffer for sscanf (e.g. "Pressure1")
-long pidSetpointInt, KpInt, KiInt, KdInt;  // scaled integer values received
+int pidSetpointInt, KpInt, KiInt, KdInt;  // scaled integer values received
 
 float pidError = 0.0;
 float pidIntegral = 0.0;
@@ -255,7 +255,7 @@ void processSerial(String inputString) {
     pumpControlMode = "Manual";
 
     analogWrite(PUMP_PWM_PIN, pumpDutyCycle);
-  } else if (sscanf(inputString.c_str(), "PID: %[^,], %ld, %ld, %ld, %ld",
+  } else if (sscanf(inputString.c_str(), "PID: %[^,], %d, %d, %d, %d",
                     pidSetpointIdBuffer, &pidSetpointInt, &KpInt, &KiInt, &KdInt)
              == 5) {
 
@@ -302,7 +302,7 @@ void processSerial(String inputString) {
     // Set pump control mode to auto so main loop can handle it from there
     pumpControlMode = "Auto";
 
-  } else if (sscanf(inputString.c_str(), "PULSE: %ld, %ld", &pulsatileBPM, &pulsatileAmplitude) == 2) {
+  } else if (sscanf(inputString.c_str(), "PULSE: %d, %d", &pulsatileBPM, &pulsatileAmplitude) == 2) {
     Serial.print("RECEIVED pulsatile flow settings (BPM: ");
     Serial.print(pulsatileBPM);
     Serial.print(", amplitude: ");
@@ -310,7 +310,7 @@ void processSerial(String inputString) {
     Serial.println(")");
 
     pumpControlMode = "Pulsatile";
-  } else if (sscanf(inputString.c_str(), "SHO: %ld, %ld, %ld", &SHO_Pressure1_Int, &SHO_Pressure2_Int, &SHO_Pressure3_Int) == 3) {
+  } else if (sscanf(inputString.c_str(), "SHO: %d, %d, %d", &SHO_Pressure1_Int, &SHO_Pressure2_Int, &SHO_Pressure3_Int) == 3) {
     SHO_Pressure1 = SHO_Pressure1_Int / SERIAL_SCALING_FACTOR;
     SHO_Pressure2 = SHO_Pressure2_Int / SERIAL_SCALING_FACTOR;
     SHO_Pressure3 = SHO_Pressure3_Int / SERIAL_SCALING_FACTOR;
