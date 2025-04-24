@@ -28,7 +28,7 @@ const unsigned char PRESSURE_SENSOR_PIN3 = A3;  // Pressure sensor 3 input pin
 
 // --- System Constants ---
 const unsigned long PRESSURE_SENSOR_READ_INTERVAL = 50;   // Interval for pressure readings (ms)
-const unsigned long FLOW_SENSOR_READ_INTERVAL = 2000;     // Interval for flow readings (ms)
+const unsigned long FLOW_SENSOR_READ_INTERVAL = 1000;     // Interval for flow readings (ms)
 const unsigned long EXPECTED_MATLAB_MESSAGE_LENGTH = 50;  // Length of expected message from MATLAB
 const unsigned long MAX_DUTY_CYCLE = 255;                 // 8-bit PWM resolution
 const bool SIMULATE_VALUES = false;                       // Toggle value simulation
@@ -315,22 +315,15 @@ void processSerial(String inputString) {
  * @return The calculated flow rate in L/min.
  */
 float readFlowSensor(volatile int &flow_pulses, int sensorNum) {
-  float flowRate = (flow_pulses / 9.68) * (1000.0 / FLOW_SENSOR_READ_INTERVAL);
+  float flowRate = (flow_pulses / 21.0) * (1000.0 / FLOW_SENSOR_READ_INTERVAL);
   flow_pulses = 0;
 
   // Adjust flow rate using calibrated piecewise linear functions
+  // TODO: Re-do calibration for both sensors with multiple points to get more accurate linear fits
   if (sensorNum == 1) {
-    if (flowRate < 1) {
-      flowRate = flowRate * 1.5773;  // Adjusted slope for continuity close to flowRate = 0
-    } else {
-      flowRate = flowRate * 0.7923 + 0.785;
-    }
+    flowRate = flowRate * 1.2789;
   } else if (sensorNum == 2) {
-    if (flowRate < 1) {
-      flowRate = flowRate * 1.4214;  // Adjusted slope for continuity close to flowRate = 0
-    } else {
-      flowRate = flowRate * 0.8133 + 0.6081;
-    }
+    flowRate = flowRate * 1.2789;
   }
   return flowRate;
 }
