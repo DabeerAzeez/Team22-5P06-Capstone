@@ -32,8 +32,8 @@ const unsigned long FLOW_SENSOR_READ_INTERVAL = 1000;     // Interval for flow r
 const unsigned long EXPECTED_MATLAB_MESSAGE_LENGTH = 50;  // Length of expected message from MATLAB
 const unsigned long MAX_DUTY_CYCLE = 255;                 // 8-bit PWM resolution
 const float SERIAL_SCALING_FACTOR = 10000;
-const bool SIMULATE_VALUES = false;                       // Toggle value simulation
-const bool SIMULATE_OSCILLATIONS = true;                  // Toggle oscillating simulated values
+const bool SIMULATE_VALUES = false;       // Toggle value simulation
+const bool SIMULATE_OSCILLATIONS = true;  // Toggle oscillating simulated values
 
 
 // ====================================================
@@ -71,7 +71,7 @@ float SHO_Pressure1 = 0;
 float SHO_Pressure2 = 0;
 float SHO_Pressure3 = 0;
 
-int SHO_Pressure1_Int, SHO_Pressure2_Int, SHO_Pressure1_Int;
+long SHO_Pressure1_Int, SHO_Pressure2_Int, SHO_Pressure3_Int;
 
 
 // ====================================================
@@ -187,14 +187,14 @@ void simulateDataValues(bool oscillate) {
   flowRate1 = 3.0 + sinValue * 0.5;  // Oscillates between 2.5 and 3.5
   flowRate2 = 4.0 + sinValue * 0.5;  // Oscillates between 3.5 and 4.5
 
-  pressureValueRaw1 = 255 + sinValue * 50;  // Oscillates around 255
-  pressureValue1 = 20 + sinValue * 10 - SHO_Pressure1;      // Oscillates between 10 and 30
+  pressureValueRaw1 = 255 + sinValue * 50;              // Oscillates around 255
+  pressureValue1 = 20 + sinValue * 10 - SHO_Pressure1;  // Oscillates between 10 and 30
 
-  pressureValueRaw2 = 255 + sinValue * 50;  // Oscillates around 255
-  pressureValue2 = 40 + sinValue * 10 - SHO_Pressure2;      // Oscillates between 30 and 50
+  pressureValueRaw2 = 255 + sinValue * 50;              // Oscillates around 255
+  pressureValue2 = 40 + sinValue * 10 - SHO_Pressure2;  // Oscillates between 30 and 50
 
-  pressureValueRaw3 = 255 + sinValue * 50;  // Oscillates around 255
-  pressureValue3 = 60 + sinValue * 10 - SHO_Pressure3;      // Oscillates between 50 and 70
+  pressureValueRaw3 = 255 + sinValue * 50;              // Oscillates around 255
+  pressureValue3 = 60 + sinValue * 10 - SHO_Pressure3;  // Oscillates between 50 and 70
 }
 
 // Reads pressure and flow sensor values at defined intervals
@@ -268,7 +268,9 @@ void processSerial(String inputString) {
     } else if (pidSetpointId.indexOf("Pressure") >= 0) {
       pidIntervalMS = PRESSURE_SENSOR_READ_INTERVAL;
     } else {
-      Serial.println("Error: Unrecognized setpoint ID. Reverting to MANUAL mode.");
+      Serial.print("Error: Unrecognized setpoint ID: ");
+      Serial.print(pidSetpointId);
+      Serial.println(". Reverting to MANUAL mode.");
       pumpControlMode = "Manual";
       return;
     }
@@ -300,7 +302,7 @@ void processSerial(String inputString) {
     // Set pump control mode to auto so main loop can handle it from there
     pumpControlMode = "Auto";
 
-  } else if (sscanf(inputString.c_str(), "PULSE: %d, %d", &pulsatileBPM, &pulsatileAmplitude) == 2) {
+  } else if (sscanf(inputString.c_str(), "PULSE: %ld, %ld", &pulsatileBPM, &pulsatileAmplitude) == 2) {
     Serial.print("RECEIVED pulsatile flow settings (BPM: ");
     Serial.print(pulsatileBPM);
     Serial.print(", amplitude: ");
@@ -308,10 +310,15 @@ void processSerial(String inputString) {
     Serial.println(")");
 
     pumpControlMode = "Pulsatile";
-  } else if  (sscanf(inputString.c_str(), "SHO: %d, %d, %d", &SHO_Pressure1_Int, &SHO_Pressure2_Int, &SHO_Pressure3_Int)) {
+  } else if (sscanf(inputString.c_str(), "SHO: %ld, %ld, %ld", &SHO_Pressure1_Int, &SHO_Pressure2_Int, &SHO_Pressure3_Int) == 3) {
     SHO_Pressure1 = SHO_Pressure1_Int / SERIAL_SCALING_FACTOR;
     SHO_Pressure2 = SHO_Pressure2_Int / SERIAL_SCALING_FACTOR;
     SHO_Pressure3 = SHO_Pressure3_Int / SERIAL_SCALING_FACTOR;
+
+    // For debugging
+    // Serial.print(SHO_Pressure1_Int);
+    // Serial.print(" | " );
+    // Serial.print(SERIAL_SCALING_FACTOR);
 
     Serial.print("RECEIVED SHOs: ");
     Serial.print(SHO_Pressure1);
