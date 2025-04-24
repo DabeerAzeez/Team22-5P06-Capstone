@@ -101,10 +101,10 @@ This system consists of two main codebases: one running on the Arduino, and one 
 
 - The MATLAB App is built using App Designer, and its file (`CCTA.mlapp`) is a binary format that **can only be edited inside MATLAB App Designer**.
 - The exported file `CCTA_exported.m` is provided for Git version tracking only. It should be re-exported and committed after any changes to maintain traceability.
-- If you plan to expand the app significantly or work collaboratively on the UI, consider moving to a **programmatic UI** approach:
+- If you plan to expand the app significantly or work collaboratively (i.e. with any more than one person at a time) on the UI, consider moving to a **programmatic UI** approach, which has files saved as plain text rather than binary, and which has more UI features than the App Designer provides:
   - [Programmatic App Building](https://www.mathworks.com/help/matlab/develop-apps-programmatically.html)
   - [GUI Layout Toolbox](https://www.mathworks.com/matlabcentral/fileexchange/47982-gui-layout-toolbox)
-- This transition is only necessary for large or collaborative UI development. Small tweaks by a single developer can continue using App Designer.
+  - Note: Less complex changes made by a single developer can continue using App Designer.
 
 ---
 
