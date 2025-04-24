@@ -17,12 +17,6 @@ At the core of this system is a MATLAB UI that interfaces with an Arduino microc
 
 ## Folder Structure
 
-### `/assets`
-Contains engineering-related reference files:
-- CAD designs of the fluid system
-- Electrical schematics for sensor and pump integration
-- Excel sheets with calibration curves and technical calculations
-
 ### `/data`
 By default this folder is not present. When the "Export Data" button is pressed it will be generated if needed. It is used to store collected experimental data, logs, and exported results from MATLAB sessions.
 
