@@ -31,6 +31,7 @@ const unsigned long PRESSURE_SENSOR_READ_INTERVAL = 50;   // Interval for pressu
 const unsigned long FLOW_SENSOR_READ_INTERVAL = 1000;     // Interval for flow readings (ms)
 const unsigned long EXPECTED_MATLAB_MESSAGE_LENGTH = 50;  // Length of expected message from MATLAB
 const unsigned long MAX_DUTY_CYCLE = 255;                 // 8-bit PWM resolution
+const float SERIAL_SCALING_FACTOR = 10000;
 const bool SIMULATE_VALUES = false;                       // Toggle value simulation
 const bool SIMULATE_OSCILLATIONS = true;                  // Toggle oscillating simulated values
 
@@ -64,6 +65,13 @@ const int PWM_MAX = 255;
 // --- Pulsatile Mode Settings ---
 int pulsatileBPM = 60;
 int pulsatileAmplitude = 0.8 * MAX_DUTY_CYCLE;
+
+// --- Static Head Offsets --
+float SHO_Pressure1 = 0;
+float SHO_Pressure2 = 0;
+float SHO_Pressure3 = 0;
+
+int SHO_Pressure1_Int, SHO_Pressure2_Int, SHO_Pressure1_Int;
 
 
 // ====================================================
@@ -180,13 +188,13 @@ void simulateDataValues(bool oscillate) {
   flowRate2 = 4.0 + sinValue * 0.5;  // Oscillates between 3.5 and 4.5
 
   pressureValueRaw1 = 255 + sinValue * 50;  // Oscillates around 255
-  pressureValue1 = 20 + sinValue * 10;      // Oscillates between 10 and 30
+  pressureValue1 = 20 + sinValue * 10 - SHO_Pressure1;      // Oscillates between 10 and 30
 
   pressureValueRaw2 = 255 + sinValue * 50;  // Oscillates around 255
-  pressureValue2 = 40 + sinValue * 10;      // Oscillates between 30 and 50
+  pressureValue2 = 40 + sinValue * 10 - SHO_Pressure2;      // Oscillates between 30 and 50
 
   pressureValueRaw3 = 255 + sinValue * 50;  // Oscillates around 255
-  pressureValue3 = 60 + sinValue * 10;      // Oscillates between 50 and 70
+  pressureValue3 = 60 + sinValue * 10 - SHO_Pressure3;      // Oscillates between 50 and 70
 }
 
 // Reads pressure and flow sensor values at defined intervals
@@ -195,11 +203,11 @@ void readSensorValues() {
   if (currentTime >= (pressureSensorTime + PRESSURE_SENSOR_READ_INTERVAL)) {
     pressureSensorTime = currentTime;
     pressureValueRaw1 = readPressureSensor(PRESSURE_SENSOR_PIN1);
-    pressureValue1 = interpolatePressure(pressureValueRaw1, 1);
+    pressureValue1 = interpolatePressure(pressureValueRaw1, 1) - SHO_Pressure1;
     pressureValueRaw2 = readPressureSensor(PRESSURE_SENSOR_PIN2);
-    pressureValue2 = interpolatePressure(pressureValueRaw2, 2);
+    pressureValue2 = interpolatePressure(pressureValueRaw2, 2) - SHO_Pressure2;
     pressureValueRaw3 = readPressureSensor(PRESSURE_SENSOR_PIN3);
-    pressureValue3 = interpolatePressure(pressureValueRaw3, 3);
+    pressureValue3 = interpolatePressure(pressureValueRaw3, 3) - SHO_Pressure3;
   }
 
   // Read flow sensor values if enough time has passed
@@ -266,10 +274,10 @@ void processSerial(String inputString) {
     }
 
     // Convert ints back to float (assumes scaling by 10000)
-    pidSetpoint = pidSetpointInt / 10000.0;
-    Kp = KpInt / 10000.0;
-    Ki = KiInt / 10000.0;
-    Kd = KdInt / 10000.0;
+    pidSetpoint = pidSetpointInt / SERIAL_SCALING_FACTOR;
+    Kp = KpInt / SERIAL_SCALING_FACTOR;
+    Ki = KiInt / SERIAL_SCALING_FACTOR;
+    Kd = KdInt / SERIAL_SCALING_FACTOR;
 
     Serial.print("RECEIVED PID SETUP -> Target: ");
     Serial.print(pidSetpointId);
@@ -300,6 +308,17 @@ void processSerial(String inputString) {
     Serial.println(")");
 
     pumpControlMode = "Pulsatile";
+  } else if  (sscanf(inputString.c_str(), "SHO: %d, %d, %d", &SHO_Pressure1_Int, &SHO_Pressure2_Int, &SHO_Pressure3_Int)) {
+    SHO_Pressure1 = SHO_Pressure1_Int / SERIAL_SCALING_FACTOR;
+    SHO_Pressure2 = SHO_Pressure2_Int / SERIAL_SCALING_FACTOR;
+    SHO_Pressure3 = SHO_Pressure3_Int / SERIAL_SCALING_FACTOR;
+
+    Serial.print("RECEIVED SHOs: ");
+    Serial.print(SHO_Pressure1);
+    Serial.print(", ");
+    Serial.print(SHO_Pressure2);
+    Serial.print(", ");
+    Serial.println(SHO_Pressure3);
   } else {
     Serial.print("ERROR: Unrecognized message: ");
     Serial.println(inputString);
@@ -497,11 +516,11 @@ void setPulsatileFlow() {
 }
 
 /*
- * Sends system data over serial, including flow readings, raw/converted pressure readings, 
- * pump duty cycle, and pulsatile flow parameters.
+ * Sends system data over serial, including flow readings, raw/converted pressure readings (with static head offset value), 
+ * pump control mode, pump duty cycle, and pulsatile flow parameters.
  * 
  * Sample message: 
- * "NF: N, F1: 0.00, F2: 0.00, P1R: 783, P1: 86.65, P2R: 9, P2: -1.28, P3R: 449, P3: 57.24 | PMP: 200 | PULSE: N, BPM: 30, AMP: 200"
+ * "NF: N, F1: 0.00, F2: 0.00, P1R: 783, P1: 86.65 (7.60), P2R: 9, P2: -1.28 (2.54), P3R: 449, P3: 57.24 (7.80) | MODE: Pulsatile | PMP: 200 | PULSE: N, BPM: 30, AMP: 200"
  */
 void sendSystemData() {
   // Flow data
@@ -517,18 +536,27 @@ void sendSystemData() {
   Serial.print(pressureValueRaw1);
   Serial.print(", P1: ");
   Serial.print(pressureValue1);
+  Serial.print(" (");
+  Serial.print(SHO_Pressure1);
+  Serial.print(")");
 
   // Pressure sensor 2
   Serial.print(", P2R: ");
   Serial.print(pressureValueRaw2);
   Serial.print(", P2: ");
   Serial.print(pressureValue2);
+  Serial.print(" (");
+  Serial.print(SHO_Pressure2);
+  Serial.print(")");
 
   // Pressure sensor 3
   Serial.print(", P3R: ");
   Serial.print(pressureValueRaw3);
   Serial.print(", P3: ");
   Serial.print(pressureValue3);
+  Serial.print(" (");
+  Serial.print(SHO_Pressure3);
+  Serial.print(")");
 
   // Control mode
   Serial.print(" | MODE: ");
