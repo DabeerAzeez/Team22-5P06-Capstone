@@ -172,6 +172,8 @@ classdef CCTA_exported < matlab.apps.AppBase
         flow2MarkerLine
         flowTargetLine
         flowFill
+        lgdPressure   matlab.graphics.illustration.Legend  % pressure legend handle
+        lgdFlow       matlab.graphics.illustration.Legend  % flow legend handle
 
         % PID Variables
         Kp_flow = 6;  % PID coefficients when controlling flow
@@ -599,7 +601,9 @@ classdef CCTA_exported < matlab.apps.AppBase
                 app.PumpPowerSlider.Enable = "on";
                 app.PumpPowerSpinner.Enable = "on";
 
-                app.setPumpPower(50);  % let Arduino know we're back to manual control
+                if app.isConnected
+                    app.setPumpPower(50);  % let Arduino know we're back to manual control
+                end
 
             elseif mode == "Auto"  % PID Control
                 app.PumpControlMode = "Auto";
@@ -1077,6 +1081,8 @@ classdef CCTA_exported < matlab.apps.AppBase
                 app.SimulateDataCheckBox.Enable = "on";  % in case it was disabled before
                 app.PauseGraphsButton.Value = false;
                 app.PauseGraphsButtonValueChanged();
+                app.PumpPowerSwitch.Value = "Off";
+                app.PumpPowerSwitchValueChanged();
 
                 % Reset pressure and flow fields
                 app.Pressure1_EditField_Current.Value = 0;
@@ -1628,10 +1634,6 @@ classdef CCTA_exported < matlab.apps.AppBase
             xlabel(app.PressureAxes, 'Time (s)');
             ylabel(app.PressureAxes, 'Pressure (mmHg)');
 
-            lgdPressure = legend(app.PressureAxes, 'show','Orientation','horizontal');
-            lgdPressure.Position = [0.1809    0.0426    0.6998    0.0520];
-            lgdPressure.FontSize = 8;
-
             % Initialize flow plot lines and fill with NaNs
             app.flow1Line = plot(app.FlowAxes, nan, nan, 'Color', app.COLOR_FLOW*0.7, 'DisplayName', app.flow1_label, 'LineWidth', lineWidth);
             app.flow2Line = plot(app.FlowAxes, nan, nan, 'Color', [0 0 0], 'DisplayName', app.flow2_label, 'LineWidth', lineWidth);
@@ -1650,13 +1652,51 @@ classdef CCTA_exported < matlab.apps.AppBase
             xlabel(app.FlowAxes, 'Time (s)');
             ylabel(app.FlowAxes, 'Flow (L/min)');
 
-            lgdFlow = legend(app.FlowAxes, 'show','Orientation','Horizontal');
-            lgdFlow.Position = [0.2496    0.0424    0.5516    0.0520];
-            lgdFlow.FontSize = 8;
-
-            lgdPressure.AutoUpdate = "off";
-            lgdFlow.AutoUpdate = "off";
+            % Update legends
+            app.updateLegends();
             
+        end
+
+        function updateLegends(app)
+            %UPDATELEGENDS   (Re)create the legends for both axes using the
+            %                 current DisplayName of each line/fill. Deletes
+            %                 any previous legend, places it horizontally,
+            %                 disables AutoUpdate so it won’t clip new data.
+
+            % Update display names for lines in case user changed them via
+            % Label UI
+            app.pressure1Line.DisplayName = app.pressure1_label;
+            app.pressure2Line.DisplayName = app.pressure2_label;
+            app.pressure3Line.DisplayName = app.pressure3_label;
+
+            app.flow1Line.DisplayName = app.flow1_label;
+            app.flow2Line.DisplayName = app.flow2_label;
+
+            % Pressure legend
+            if isgraphics(app.lgdPressure)
+                delete(app.lgdPressure);
+            end
+
+            app.lgdPressure = legend(app.PressureAxes, ...
+                [ app.pressure1Line, app.pressure2Line, ...
+                app.pressure3Line, app.pressureTargetLine, ...
+                app.pressureFill ], ...
+                'Orientation','horizontal');
+            app.lgdPressure.Position   = [0.1809 0.0426 0.6998 0.0520];
+            app.lgdPressure.FontSize   = 8;
+            app.lgdPressure.AutoUpdate = 'off';
+
+            % Flow legend
+            if isgraphics(app.lgdFlow)
+                delete(app.lgdFlow);
+            end
+            app.lgdFlow = legend(app.FlowAxes, ...
+                [ app.flow1Line, app.flow2Line, ...
+                app.flowTargetLine, app.flowFill ], ...
+                'Orientation','horizontal');
+            app.lgdFlow.Position       = [0.2496 0.0424 0.5516 0.0520];
+            app.lgdFlow.FontSize       = 8;
+            app.lgdFlow.AutoUpdate     = 'off';
         end
         
 
@@ -2078,26 +2118,31 @@ classdef CCTA_exported < matlab.apps.AppBase
         % Value changed function: Pressure1_LabelField
         function Pressure1_LabelFieldValueChanged(app, event)
             app.pressure1_label = app.Pressure1_LabelField.Value;
+            app.updateLegends();
         end
 
         % Value changed function: Pressure2_LabelField
         function Pressure2_LabelFieldValueChanged(app, event)
             app.pressure2_label = app.Pressure2_LabelField.Value;
+            app.updateLegends();
         end
 
         % Value changed function: Pressure3_LabelField
         function Pressure3_LabelFieldValueChanged(app, event)
             app.pressure3_label = app.Pressure3_LabelField.Value;
+            app.updateLegends();
         end
 
         % Value changed function: Flow1_LabelField
         function Flow1_LabelFieldValueChanged(app, event)
             app.flow1_label = app.Flow1_LabelField.Value;
+            app.updateLegends();
         end
 
         % Value changed function: Flow2_LabelField
         function Flow2_LabelFieldValueChanged(app, event)
             app.flow2_label = app.Flow2_LabelField.Value;
+            app.updateLegends();
         end
 
         % Value changed function: Flow1_EditField_Target
@@ -2922,6 +2967,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             % Create PumpPowerSwitch
             app.PumpPowerSwitch = uiswitch(app.PumpControlPanel, 'slider');
             app.PumpPowerSwitch.ValueChangedFcn = createCallbackFcn(app, @PumpPowerSwitchValueChanged, true);
+            app.PumpPowerSwitch.Tooltip = {'Enables pump control (but starts at 0% power by default).'};
             app.PumpPowerSwitch.FontWeight = 'bold';
             app.PumpPowerSwitch.Position = [184 159 45 20];
 
@@ -3034,6 +3080,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.ClearDataButton.FontWeight = 'bold';
             app.ClearDataButton.FontColor = [1 1 1];
             app.ClearDataButton.Enable = 'off';
+            app.ClearDataButton.Tooltip = {'Clear all graphical/numerical data collected.'};
             app.ClearDataButton.Position = [5 12 146 31];
             app.ClearDataButton.Text = 'Clear Data';
 
@@ -3046,6 +3093,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.ExportDataButton.FontWeight = 'bold';
             app.ExportDataButton.FontColor = [1 1 1];
             app.ExportDataButton.Enable = 'off';
+            app.ExportDataButton.Tooltip = {'Export data currently visible on the graphs to various formats: .xlsx, .png, .mat, .txt.'};
             app.ExportDataButton.Position = [161 12 145 31];
             app.ExportDataButton.Text = 'Export Data';
 
@@ -3058,6 +3106,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.CalibrateButton.FontWeight = 'bold';
             app.CalibrateButton.FontColor = [1 1 1];
             app.CalibrateButton.Enable = 'off';
+            app.CalibrateButton.Tooltip = {'Begin static head offset (SHO) calibration'};
             app.CalibrateButton.Position = [5 47 146 31];
             app.CalibrateButton.Text = 'Calibrate';
 
@@ -3072,6 +3121,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             % Create ConnectionDropDown
             app.ConnectionDropDown = uidropdown(app.MainTab);
             app.ConnectionDropDown.Items = {};
+            app.ConnectionDropDown.Tooltip = {'Select a COM port to connect to'};
             app.ConnectionDropDown.FontSize = 14;
             app.ConnectionDropDown.FontWeight = 'bold';
             app.ConnectionDropDown.FontColor = [0.149 0.149 0.149];
@@ -3092,6 +3142,7 @@ classdef CCTA_exported < matlab.apps.AppBase
             app.RefreshConnectionsButton.FontSize = 14;
             app.RefreshConnectionsButton.FontWeight = 'bold';
             app.RefreshConnectionsButton.FontColor = [0.149 0.149 0.149];
+            app.RefreshConnectionsButton.Tooltip = {'Refresh serial connections'};
             app.RefreshConnectionsButton.Position = [253 472 31 32];
             app.RefreshConnectionsButton.Text = '';
 
