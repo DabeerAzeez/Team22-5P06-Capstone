@@ -125,8 +125,9 @@ For more information on editing the UI, refer to the **Additional Documentation*
 
 ### Notes on Version Control for the MATLAB App
 
-- The MATLAB App is built using App Designer, and its file (`CCTA.mlapp`) is a binary format that **can only be edited inside MATLAB App Designer**.
-- The exported file `CCTA_exported.m` is provided for Git version tracking only. It should be re-exported and committed after any changes to maintain traceability.
+- The MATLAB App is built using App Designer, and its file (`CCTA.mlapp`) is a binary format. As a result, the file **can only be edited inside MATLAB App Designer** and **cannot be viewed easily in Version Control Systems like Git**. 
+  - This makes it very difficult to do merge commits between developers, or to pick and choose lines from previous commits to discard, for instance.
+- The exported file `CCTA_exported.m` is provided for Git version tracking only. It should be re-exported and committed after any changes to maintain traceability. This file cannot run the application, however, and is purely cosmetic.
 - If you plan to expand the app significantly or work collaboratively (i.e. with any more than one person at a time) on the UI, consider moving to a **programmatic UI** approach, which has files saved as plain text rather than binary, and which has more UI features than the App Designer provides:
   - [Programmatic App Building](https://www.mathworks.com/help/matlab/develop-apps-programmatically.html)
   - [GUI Layout Toolbox](https://www.mathworks.com/matlabcentral/fileexchange/47982-gui-layout-toolbox)
