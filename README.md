@@ -3,10 +3,10 @@
 ## Overview 🫀
 
 <img src="./readme_imgs/system_diagram.png" alt="System Schematic" width="700"/>
-<p align="center"><em>Figure 1: System schematic showing data and control flow between components.</em></p>
+<p align="left"><em>Figure 1: System schematic showing data and control flow between components.</em></p>
 
 <img src="./readme_imgs/prototype.png" alt="Prototype" width="500"/>
-<p align="center"><em>Figure 2: Physical prototype of the Cardiac Catheterization Testing Apparatus (CCTA).</em></p>
+<p align="left"><em>Figure 2: Physical prototype of the Cardiac Catheterization Testing Apparatus (CCTA).</em></p>
 
 
 This project presents a low-cost, modular cardiac catheterization testing system designed to simulate physiological pressure and flow conditions in a controlled and reproducible in-vitro environment. It replaces the need for expensive commercial simulators or ethically problematic animal testing setups by offering a customizable, software-integrated alternative.
