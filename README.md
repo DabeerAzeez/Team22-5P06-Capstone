@@ -52,6 +52,12 @@ See the diagram below for a simplified system data flow:
 
 This system consists of two main codebases: one running on the Arduino, and one built in MATLAB using App Designer. The two communicate through serial to perform real-time data acquisition and control.
 
+## 📁 CAD Folder
+The CAD folder contains all design files related to the CCTA system, including:
+  - Heart Models: 3D models of various anatomical sections used in testing and validation.
+  - Control Box Components: Individual parts and full assemblies for the control box housing the electronics.
+  - File Formats: Files are provided in both .STEP and .STL formats to allow for easy modification, 3D printing, or further CAD work.
+  - You can access all CAD files through the following Dropbox folder: [here](https://www.dropbox.com/scl/fo/yjmt5i3i0j0n0u83sl67j/ANwJctLE-TN2iwv-adeiof4?rlkey=2c2dtay8s89e7o38lwqr1shu5&st=apt6u5zz&dl=0)
 ## ✍️ Editing the Code
 
 To modify the system behavior or interface, you'll need to edit either the Arduino firmware or the MATLAB App.
