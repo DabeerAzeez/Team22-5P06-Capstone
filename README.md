@@ -161,4 +161,4 @@ For any questions or inquiries, feel free to reach out to the contributors:
 - **Aly Pirbay** (Mechanical) - apirbay1@gmail.com
   - Designed and optimized mechanical components of design
 
-*Special thanks to Foss, Rhodaba, and Sara from Boston Scientific for all your support with the project!*
+*Special thanks to Foss Jiao, Rhodaba Ebady, and Sara Safadel from Boston Scientific for all your support with the project!*
